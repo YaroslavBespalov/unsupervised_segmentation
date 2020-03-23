@@ -8,3 +8,7 @@ class DatasetParameters(ArgumentParser):
         self.add_argument('--image_size', type=int, default=256)
         self.add_argument('--batch_size', type=int, default=8)
         self.add_argument('--measure_size', type=int, default=70)
+
+
+
+

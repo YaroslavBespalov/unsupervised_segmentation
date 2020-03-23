@@ -38,15 +38,17 @@ def send_to_tensorboard(*name2type: str, counter: ItersCounter, skip: int = 1, w
             if not iter % skip == 0:
                 return res
 
+            res_tuple = res
             if not isinstance(res, (tuple, list)):
-                res = (res,)
+                res_tuple = (res,)
+
             for i in range(len(name2type)):
-                if isinstance(res[i], float):
-                    writer.add_scalar(name2type[i], res[i], iter)
-                elif isinstance(res[i], Tensor) and len(res[i].shape) == 4:
+                if isinstance(res_tuple[i], float):
+                    writer.add_scalar(name2type[i], res_tuple[i], iter)
+                elif isinstance(res_tuple[i], Tensor) and len(res_tuple[i].shape) == 4:
 
                     with torch.no_grad():
-                        grid = make_grid(res[i][0:4], nrow=4, padding=2, pad_value=0, normalize=True, range=(-1, 1), scale_each=False)
+                        grid = make_grid(res_tuple[i][0:4], nrow=4, padding=2, pad_value=0, normalize=True, range=(-1, 1), scale_each=False)
                         writer.add_image(name2type[i], grid, iter)
 
             return res

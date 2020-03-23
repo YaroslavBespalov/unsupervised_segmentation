@@ -4,8 +4,8 @@ from typing import List
 from torch import nn, Tensor
 import torch
 from torch.nn import functional as F
-from stylegan2_pytorch.model import Blur, ConvLayer
-from stylegan2_pytorch.op import FusedLeakyReLU
+from stylegan2.model import Blur, ConvLayer
+from stylegan2.op import FusedLeakyReLU
 
 
 class ScaledConvTranspose2d(nn.Module):
