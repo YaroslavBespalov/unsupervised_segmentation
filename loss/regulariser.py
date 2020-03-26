@@ -75,12 +75,12 @@ class BarycenterRegularizer:
 
         def loss(image: Tensor, mask: ProbabilityMeasure):
             with torch.no_grad():
-                A, T = LinearTransformOT.forward(mask, barycenter)
+                A, T = LinearTransformOT.forward(mask, barycenter, 100)
             #     P = SOT(200, 0.001).forward(mask, barycenter)
 
-            t_loss = Samples_Loss()(mask, mask.detach() + T)
-            a_loss = Samples_Loss()(mask.centered(), mask.centered().multiply(A).detach())
-            w_loss = Samples_Loss()(mask.centered().multiply(A), barycenter.centered().detach())
+            t_loss = Samples_Loss(scaling=0.8)(mask, mask.detach() + T)
+            a_loss = Samples_Loss(scaling=0.8)(mask.centered(), mask.centered().multiply(A).detach())
+            w_loss = Samples_Loss(scaling=0.8)(mask.centered().multiply(A), barycenter.centered().detach())
 
             return a_loss * ca + w_loss * cw + t_loss * ct
             # return Samples_Loss()(mask, barycenter.detach()) * 10
