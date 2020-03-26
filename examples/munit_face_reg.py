@@ -165,7 +165,7 @@ for epoch in range(500):
         )
 
         if i < 1500:
-            (Whole_Reg.apply(i)(imgs, pred_measures) * 10).minimize_step(cont_style_opt)
+            (Whole_Reg.apply(i)(imgs, pred_measures)).minimize_step(cont_style_opt)
 
             if i % 100 == 0:
                 tensorboard_scatter(pred_measures.coord.cpu().detach(), writer, i)
@@ -177,7 +177,7 @@ for epoch in range(500):
         Loss(nn.L1Loss()(restored, imgs) * 20 + \
              nn.L1Loss()(restored_content, content.detach()) * 0.5 + \
              torch.mean(style ** 2) + \
-             (R_b + R_t * 10)(imgs, pred_measures).to_tensor() * 100
+             (R_b + R_t * 5)(imgs, pred_measures).to_tensor() * 50
              # nn.L1Loss()(restored_style, style.detach()) * 1
              ).minimize_step(gan_model.optimizer.opt_min)
 

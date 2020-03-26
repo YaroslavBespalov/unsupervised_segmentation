@@ -6,6 +6,17 @@ from torch import nn, Tensor
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+def tensorboard_scatter(tensor : Tensor, writer: SummaryWriter, step: int):
+    x, y = tensor[:, :, 0], tensor[:, :, 1]
+    plt.switch_backend('agg')
+    fig, ax = plt.subplots(1, 4, figsize=(16, 4))
+    for i in range(4):
+        ax[i].scatter(x[i].numpy(), y[i].numpy())
+    writer.add_figure('Measure', fig, global_step=step)
+
 
 class ItersCounter:
 
