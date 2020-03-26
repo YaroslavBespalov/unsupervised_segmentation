@@ -1,5 +1,7 @@
 runs
 gans_pytorch
+__pycache__
+*.pyc
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
