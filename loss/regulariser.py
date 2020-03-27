@@ -80,7 +80,7 @@ class BarycenterRegularizer:
 
             t_loss = Samples_Loss(scaling=0.8, border=0.001)(mask, mask.detach() + T)
             a_loss = Samples_Loss(scaling=0.8, border=0.001)(mask.centered(), mask.centered().multiply(A).detach())
-            w_loss = Samples_Loss(scaling=0.8, border=0.0008)(mask.centered().multiply(A), barycenter.centered().detach())
+            w_loss = Samples_Loss(scaling=0.8, border=0.0007)(mask.centered().multiply(A), barycenter.centered().detach())
 
             return a_loss * ca + w_loss * cw + t_loss * ct
             # return Samples_Loss()(mask, barycenter.detach()) * 10
