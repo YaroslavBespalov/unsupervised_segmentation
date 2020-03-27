@@ -1,6 +1,7 @@
 import sys
 import os
 
+from torch.distributions import Normal
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 
@@ -15,7 +16,7 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/munit/'))
 import argparse
 import time
 from itertools import chain
-from typing import List
+from typing import List, Callable
 import numpy as np
 import albumentations
 import matplotlib
@@ -71,7 +72,7 @@ args = parser.parse_args()
 for k in vars(args):
     print(f"{k}: {vars(args)[k]}")
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_device(device)
 
 image_size = 256
@@ -81,8 +82,8 @@ full_dataset = ImageMeasureDataset(
     "/raid/data/celeba_masks",
     img_transform=torchvision.transforms.Compose([
         torchvision.transforms.Resize((image_size, image_size)),
+        torchvision.transforms.RandomAffine(degrees=10, scale=(0.9, 1.1), translate=(0.05, 0.05)),
         torchvision.transforms.ToTensor(),
-        torchvision.transforms.RandomAffine(degrees=10, scale=(0.9, 1.1), translate=0.05),
         torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ])
 )
@@ -101,20 +102,20 @@ dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_si
 
 noise = NormalNoise(args.noise_size, device)
 
-gan_model: GANModel = ganmodel_munit("hinge", 0.0001, args)
+gan_model: GANModel = ganmodel_munit("hinge", (0.0001, 0.0002), args)
 
 # enc_style = StyleEncoder(n_downsample=4, input_dim=args.input_dim, dim=args.dim, style_dim=args.style_dim,
 #                          norm=args.norm, activ=args.activ, pad_type=args.pad_type).cuda()
 # enc_content: ContentEncoder = ContentEncoder(args.n_downsample, args.n_res, args.input_dim, args.dim, 'in', args.activ,
 #                                              args.pad_type).cuda()
 
-cont_style_encoder = cont_style_munit_enc(args)
-cont_style_opt = torch.optim.Adam(cont_style_encoder.parameters(), lr=1e-4)
-gan_model.optimizer.add_param_group((cont_style_encoder.parameters(), None), (1e-4, None))
+cont_style_encoder: nn.Module = cont_style_munit_enc(args, "/home/ibespalov/pomoika/munit_encoder.pt")
+cont_style_opt = torch.optim.Adam(cont_style_encoder.parameters(), lr=1e-5)
+# gan_model.optimizer.add_param_group((cont_style_encoder.parameters(), None), (1e-5, None))
 
 counter = ItersCounter()
-writer = SummaryWriter("/home/ibespalov/pomoika/munit")
-# gan_model.train = send_to_tensorboard("generator loss", "discriminator loss", counter=counter, writer=writer)(gan_model.train)
+writer = SummaryWriter(f"/home/ibespalov/pomoika/munit{int(time.time())}")
+gan_model.loss_pair = send_to_tensorboard("G", "D", counter=counter, writer=writer)(gan_model.loss_pair)
 # gan_model.generator.forward = send_to_tensorboard("Fake", counter=counter, skip=10, writer=writer)(
 #     gan_model.generator.forward
 # )
@@ -134,18 +135,33 @@ g_transforms: albumentations.DualTransform = albumentations.Compose([
 R_b = BarycenterRegularizer.__call__(barycenter)
 R_t = DualTransformRegularizer.__call__(
     g_transforms, lambda trans_dict:
-    Samples_Loss(scaling=0.8)(content_to_measure(cont_style_encoder(trans_dict['image'])[0]), trans_dict['mask'])
+    Samples_Loss(scaling=0.8, p=1)(content_to_measure(cont_style_encoder(trans_dict['image'])[0]), trans_dict['mask'])
 )
 
 R_b.forward = send_to_tensorboard("R_b", counter=counter, writer=writer)(R_b.forward)
+R_t.forward = send_to_tensorboard("R_t", counter=counter, writer=writer)(R_t.forward)
 
-deform_array = list(np.linspace(0, 5, 1500))
-Whole_Reg = R_t @ deform_array + R_b
+# deform_array = list(np.linspace(0, 5, 1500))
+# Whole_Reg = R_t @ deform_array + R_b
 # images, labels = next(iter(dataloader))
 # content, style = cont_style_encoder(images.cuda())
 # writer.add_graph(gan_model.generator, [content.cuda(), style.cuda()])
 # writer.add_graph(gan_model.loss.discriminator, images.cuda())
 # writer.add_graph(cont_style_encoder, images.cuda())
+
+l1_loss = nn.L1Loss()
+
+def L1(name: str, writer: SummaryWriter = writer) -> Callable[[Tensor, Tensor], Loss]:
+
+    counter.active[name] = True
+
+    def compute(t1: Tensor, t2: Tensor):
+        loss = l1_loss(t1, t2)
+        writer.add_scalar(name, loss, counter.get_iter(name))
+        return Loss(loss)
+
+    return compute
+
 
 for epoch in range(500):
 
@@ -164,28 +180,36 @@ for epoch in range(500):
             content.reshape(args.batch_size, 70, 2) #.sigmoid()
         )
 
-        if i < 1500:
-            (Whole_Reg.apply(i)(imgs, pred_measures)).minimize_step(cont_style_opt)
-
-            if i % 100 == 0:
-                tensorboard_scatter(pred_measures.coord.cpu().detach(), writer, i)
-            continue
+        # if i == 1499:
+        #     print("saving model to /home/ibespalov/pomoika/munit_encoder.pt")
+        #     torch.save(cont_style_encoder.state_dict(), "/home/ibespalov/pomoika/munit_encoder.pt")
+        #
+        # if i < 1500:
+        #     (Whole_Reg.apply(i)(imgs, pred_measures) * 2).minimize_step(cont_style_opt)
+        #
+        #     if i % 100 == 0:
+        #         tensorboard_scatter(pred_measures.coord.cpu().detach(), writer, i)
+        #     continue
 
         restored = gan_model.generator(content, style)
         sohranennii_restored = restored.detach()
-        restored_content, restored_style = cont_style_encoder(restored)
-        Loss(nn.L1Loss()(restored, imgs) * 20 + \
-             nn.L1Loss()(restored_content, content.detach()) * 0.5 + \
-             torch.mean(style ** 2) + \
-             (R_b + R_t * 5)(imgs, pred_measures).to_tensor() * 50
-             # nn.L1Loss()(restored_style, style.detach()) * 1
-             ).minimize_step(gan_model.optimizer.opt_min)
+        restored_content, _ = cont_style_encoder(restored)
 
+        L1("L1 content")(restored_content, content.detach()).minimize_step(gan_model.optimizer.opt_min, retain_graph=True)
+
+        writer.add_scalar("style norm", (style ** 2).view(args.batch_size, -1).sum(dim=1).pow(0.5).max(), i)
+
+        (
+                L1("L1 image")(restored, imgs) * 20 +
+                (R_b + R_t * 0.2)(imgs, pred_measures) * 100
+        ).minimize_step(gan_model.optimizer.opt_min, cont_style_opt)
 
         content, _ = cont_style_encoder(imgs)
-        style_noise = noise.sample(args.batch_size)[:, :, None, None]
-        restored = gan_model.generator(content, style_noise)
+        style_noise = noise.sample(args.batch_size)[:, :, None, None].tanh()
+        restored = gan_model.generator(content.detach(), style_noise)
         restored_content, restored_style = cont_style_encoder(restored)
+
+        (L1("gan L1 style")(restored_style, style_noise.detach()) * 2).minimize_step(cont_style_opt, retain_graph=True)
 
         if i % 100 == 0:
             with torch.no_grad():
@@ -204,11 +228,11 @@ for epoch in range(500):
 
                 tensorboard_scatter(pred_measures.coord.cpu().detach(), writer, i)
 
+        (gan_model.loss_pair([imgs], [restored]).add_min_loss(
+            L1("gan L1 content")(restored_content, content.detach()) * 2
+        )).minimize_step(gan_model.optimizer)
 
-        gan_model.loss_pair([imgs], [restored]).add_min_loss(
-            Loss(nn.L1Loss()(restored_content, content.detach()) * 0.5 + \
-                 nn.L1Loss()(restored_style, style_noise.detach()) * 1)
-        ).minimize_step(gan_model.optimizer)
+        gan_model.generator_loss([imgs], content, style_noise).minimize_step(cont_style_opt)
 
 
 

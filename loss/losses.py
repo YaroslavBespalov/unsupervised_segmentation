@@ -11,10 +11,10 @@ from loss_base import Loss
 
 
 class Samples_Loss(nn.Module):
-    def __init__(self, blur=.01, scaling=.9, diameter=None, border=None):
+    def __init__(self, blur=.01, scaling=.9, diameter=None, border=None, p: int = 2):
         super(Samples_Loss, self).__init__()
         self.border = border
-        self.loss = SamplesLoss("sinkhorn", blur=blur, scaling=scaling, debias=False, diameter=diameter)
+        self.loss = SamplesLoss("sinkhorn", blur=blur, scaling=scaling, debias=False, diameter=diameter, p=p)
         # self.pot = SamplesLoss("sinkhorn", blur=blur, scaling=scaling, debias=False, potentials=True)
 
     def forward(self, m1: ProbabilityMeasure, m2: ProbabilityMeasure):

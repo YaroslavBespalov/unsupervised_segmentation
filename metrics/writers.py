@@ -9,6 +9,10 @@ from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 import numpy as np
 
+from loss_base import Loss
+from optim.min_max import MinMaxLoss
+
+
 def tensorboard_scatter(tensor : Tensor, writer: SummaryWriter, step: int):
     x, y = tensor[:, :, 0], tensor[:, :, 1]
     plt.switch_backend('agg')
@@ -49,13 +53,19 @@ def send_to_tensorboard(*name2type: str, counter: ItersCounter, skip: int = 1, w
             if not iter % skip == 0:
                 return res
 
-            res_tuple = res
+            res_tuple: Tuple[Tensor] = res
             if not isinstance(res, (tuple, list)):
                 res_tuple = (res,)
 
             for i in range(len(name2type)):
-                if isinstance(res_tuple[i], float):
+                if isinstance(res_tuple[i], MinMaxLoss):
+                    writer.add_scalar(name2type[i], res_tuple[i].min_loss.to_tensor(), iter)
+                    writer.add_scalar(name2type[i+1], res_tuple[i].max_loss.to_tensor(), iter)
+                    break
+                elif isinstance(res_tuple[i], float):
                     writer.add_scalar(name2type[i], res_tuple[i], iter)
+                elif isinstance(res_tuple[i], Loss):
+                    writer.add_scalar(name2type[i], res_tuple[i].to_tensor(), iter)
                 elif isinstance(res_tuple[i], Tensor) and len(res_tuple[i].shape) == 4:
 
                     with torch.no_grad():
@@ -67,6 +77,8 @@ def send_to_tensorboard(*name2type: str, counter: ItersCounter, skip: int = 1, w
         return decorated
 
     return decorator
+
+
 
 
 
