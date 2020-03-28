@@ -1,9 +1,12 @@
+import time
+
 import torch
 import numpy as np
 from albumentations import DualTransform, BasicTransform
 from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric
 from scipy.ndimage import label, generate_binary_structure
 from matplotlib import pyplot as plt
+from joblib import Parallel, delayed
 
 
 class MeasureToMask(DualTransform):
@@ -55,15 +58,29 @@ class NumpyBatch(BasicTransform):
         batch_img = []
         batch_mask = []
 
-        for i in range(img.shape[0]):
-            data = self.transform(image=img[i], mask=mask[i])
-            if data["image"].sum() is None or data["mask"].sum() is None:
-                print("None in transform!!! Transform cancelled.")
-                data = {"image": img[i], "mask": mask[i]}
+        t1 = time.time()
 
+        def compute(transform, img_i, mask_i):
+
+            data_i = transform(image=img_i, mask=mask_i)
+
+            if data_i["image"].sum() is None or data_i["mask"].sum() is None:
+                print("None in transform!!! Transform cancelled.")
+                data_i = {"image": img_i, "mask": mask_i}
+
+            return data_i
+
+        processed_list = Parallel(n_jobs=16)(delayed(compute)(self.transform, img[i], mask[i]) for i in range(img.shape[0]))
+
+        # print(time.time() - t1)
+
+        for data in processed_list:
             batch_img.append(data["image"][np.newaxis, ...])
             data["mask"][data["mask"] < 0] = 0
             batch_mask.append(data["mask"][np.newaxis, ...] / (data["mask"].sum() + 1e-8))
+
+
+
 
         return {
             "image": np.concatenate(batch_img, axis=0),
@@ -93,8 +110,10 @@ def clusterization(images: torch.Tensor, size=256, padding=70):
     coord_result, prob_result = [], []
 
     # print("img sum:", images.sum(dim=[1,2,3]).max())
+    # t1 = time.time()
 
-    for sample in range(imgs.shape[0]):
+    # for sample in range(imgs.shape[0]):
+    def compute(sample):
         x, y = np.where((imgs[sample] > 1e-6))
         measure_mask = np.zeros((2, size, size))
         measure_mask[0, x, y] = 1
@@ -124,10 +143,20 @@ def clusterization(images: torch.Tensor, size=256, padding=70):
         sample_centroids_coords = np.transpose(np.array(sample_centroids_coords), axes=(0, 2, 1))
         sample_probs_value = np.array(sample_probs_value)
 
-        coord_result.append(sample_centroids_coords)
+        # coord_result.append(sample_centroids_coords)
         assert(sample_probs_value.sum() != 0)
         assert(sample_probs_value.all() / sample_probs_value.sum() >= 0)
-        prob_result.append(sample_probs_value / sample_probs_value.sum())
+        # prob_result.append(sample_probs_value / sample_probs_value.sum())
+
+        return sample_centroids_coords,  sample_probs_value / sample_probs_value.sum()
+
+    processed_list = Parallel(n_jobs=16)(delayed(compute)(i) for i in range(imgs.shape[0]))
+
+    for x, p in processed_list:
+        coord_result.append(x)
+        prob_result.append(p)
+
+    # print(time.time() - t1)
 
     return ProbabilityMeasure(torch.tensor(np.concatenate(prob_result, axis=0)).type(torch.float32),
                               torch.tensor(np.concatenate(coord_result, axis=0)).type(torch.float32)).cuda()

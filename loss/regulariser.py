@@ -1,3 +1,4 @@
+import time
 from typing import Generic, TypeVar, Callable, Tuple, Dict, List
 import torch
 import torch.nn as nn
@@ -71,20 +72,21 @@ class DualTransformRegularizer:
 class BarycenterRegularizer:
 
     @staticmethod
-    def __call__(barycenter, ct: float = 0.3, ca: float = 1, cw: float = 10):
+    def __call__(barycenter, ct: float = 0.1, ca: float = 0.3, cw: float = 10):
 
         def loss(image: Tensor, mask: ProbabilityMeasure):
+
+            # t1 = time.time()
+
             with torch.no_grad():
                 A, T = LinearTransformOT.forward(mask, barycenter, 100)
-            #     P = SOT(200, 0.001).forward(mask, barycenter)
 
             t_loss = Samples_Loss(scaling=0.8, border=0.001)(mask, mask.detach() + T)
             a_loss = Samples_Loss(scaling=0.8, border=0.001)(mask.centered(), mask.centered().multiply(A).detach())
-            w_loss = Samples_Loss(scaling=0.8, border=0.0007)(mask.centered().multiply(A), barycenter.centered().detach())
+            w_loss = Samples_Loss(scaling=0.8, border=0.0002)(mask.centered().multiply(A), barycenter.centered().detach())
+
+            # print(time.time() - t1)
 
             return a_loss * ca + w_loss * cw + t_loss * ct
-            # return Samples_Loss()(mask, barycenter.detach()) * 10
-            # M = PairwiseDistance()(mask.coord, barycenter.coord)
-            # return Loss((M * P).mean(0).sum()) * 10
 
         return RegularizerObject.__call__(loss)
