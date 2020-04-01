@@ -2,25 +2,22 @@ import sys
 import os
 
 from torch.distributions import Normal
+from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
-
-# from munit.networks import StyleEncoder, ContentEncoder
 
 sys.path.append(os.path.join(sys.path[0], '../'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
-sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/munit/'))
 
+from models.munit.enc_dec import MunitEncoder
 import argparse
 import time
 from itertools import chain
-from typing import List, Callable
+from typing import List, Callable, Optional
 import numpy as np
 import albumentations
-import matplotlib
-import matplotlib.pyplot as plt
 import torch
 import torchvision
 from metrics.writers import send_to_tensorboard, ItersCounter, tensorboard_scatter
@@ -30,7 +27,8 @@ from torch import optim
 from torchvision import utils
 from dataset.cardio_dataset import SegmentationDataset, MRIImages, ImageMeasureDataset
 from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure
-from gans_pytorch.gan.gan_model import GANModel, ganmodel_munit, cont_style_munit_enc
+from gans_pytorch.gan.gan_model import GANModel, ganmodel_munit, cont_style_munit_enc, ConditionalGANModel, \
+    cond_ganmodel_munit
 from gans_pytorch.gan.loss.wasserstein import WassersteinLoss
 from gans_pytorch.gan.loss.hinge import HingeLoss
 from gans_pytorch.gan.noise.normal import NormalNoise
@@ -53,11 +51,20 @@ from parameters.gan import GanParameters, MunitParameters
 from transforms_utils.transforms import MeasureToMask, ToNumpy, ToTensor, MaskToMeasure, NumpyBatch
 from useful_utils.save import save_image_with_mask
 
+
 def imgs_with_mask(imgs, mask):
     mask = torch.cat([mask, mask, mask], dim=1)
     res = imgs.cpu().detach()
     res[mask > 0.00001] = 1
     return res
+
+
+def send_images_to_tensorboard(data: Tensor, name: str, iter: int, count=8):
+    with torch.no_grad():
+        grid = make_grid(
+            data[0:count], nrow=count, padding=2, pad_value=0, normalize=True, range=(-1, 1),
+            scale_each=False)
+        writer.add_image(name, grid, iter)
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -100,25 +107,26 @@ train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [len(f
 
 dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=20)
 
-noise = NormalNoise(args.noise_size, device)
+noise_gen = NormalNoise(args.noise_size, device)
 
-gan_model: GANModel = ganmodel_munit("hinge", (0.0004, 0.0004), args)
+gan_model: ConditionalGANModel = cond_ganmodel_munit("hinge", (0.0005, 0.001), args, None)
 
-# enc_style = StyleEncoder(n_downsample=4, input_dim=args.input_dim, dim=args.dim, style_dim=args.style_dim,
-#                          norm=args.norm, activ=args.activ, pad_type=args.pad_type).cuda()
-# enc_content: ContentEncoder = ContentEncoder(args.n_downsample, args.n_res, args.input_dim, args.dim, 'in', args.activ,
-#                                              args.pad_type).cuda()
+cont_style_encoder: MunitEncoder = cont_style_munit_enc(
+    args,
+    "/home/ibespalov/pomoika/munit_content_encoder15.pt",
+    "/home/ibespalov/pomoika/munit_style_encoder_1.pt"
+)
 
-cont_style_encoder: nn.Module = cont_style_munit_enc(args)#, "/home/ibespalov/pomoika/munit_encoder.pt")
-cont_style_opt = torch.optim.Adam(cont_style_encoder.parameters(), lr=1e-5)
-# gan_model.optimizer.add_param_group((cont_style_encoder.parameters(), None), (1e-5, None))
+style_opt = optim.Adam(cont_style_encoder.enc_style.parameters(), lr=5e-4, betas=(0.5, 0.999))
+
+scheduler_1 = StepLR(gan_model.optimizer.opt_min, step_size=1, gamma=0.5)
+scheduler_2 = StepLR(gan_model.optimizer.opt_max, step_size=1, gamma=0.5)
+scheduler_3 = StepLR(style_opt, step_size=1, gamma=0.5)
 
 counter = ItersCounter()
 writer = SummaryWriter(f"/home/ibespalov/pomoika/munit{int(time.time())}")
 gan_model.loss_pair = send_to_tensorboard("G", "D", counter=counter, writer=writer)(gan_model.loss_pair)
-# gan_model.generator.forward = send_to_tensorboard("Fake", counter=counter, skip=10, writer=writer)(
-#     gan_model.generator.forward
-# )
+
 
 fabric = ProbabilityMeasureFabric(args.image_size)
 barycenter = fabric.load("/home/ibespalov/unsupervised_pattern_segmentation/examples/face_barycenter").cuda().padding(args.measure_size).batch_repeat(args.batch_size)
@@ -126,8 +134,8 @@ barycenter = fabric.load("/home/ibespalov/unsupervised_pattern_segmentation/exam
 g_transforms: albumentations.DualTransform = albumentations.Compose([
     MeasureToMask(size=256),
     ToNumpy(),
-    NumpyBatch(albumentations.ElasticTransform(p=1, alpha=100, alpha_affine=1, sigma=10)),
-    NumpyBatch(albumentations.ShiftScaleRotate(p=1, rotate_limit=10)),
+    NumpyBatch(albumentations.ElasticTransform(p=0.5, alpha=100, alpha_affine=1, sigma=10)),
+    NumpyBatch(albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10)),
     ToTensor(device),
     MaskToMeasure(size=256, padding=args.measure_size),
 
@@ -144,29 +152,39 @@ R_t.forward = send_to_tensorboard("R_t", counter=counter, writer=writer)(R_t.for
 
 deform_array = list(np.linspace(0, 1, 1500))
 Whole_Reg = R_t @ deform_array + R_b
-# images, labels = next(iter(dataloader))
-# content, style = cont_style_encoder(images.cuda())
-# writer.add_graph(gan_model.generator, [content.cuda(), style.cuda()])
-# writer.add_graph(gan_model.loss.discriminator, images.cuda())
-# writer.add_graph(cont_style_encoder, images.cuda())
-
 l1_loss = nn.L1Loss()
 
-def L1(name: str, writer: SummaryWriter = writer) -> Callable[[Tensor, Tensor], Loss]:
 
-    counter.active[name] = True
+def L1(name: Optional[str], writer: SummaryWriter = writer) -> Callable[[Tensor, Tensor], Loss]:
+
+    if name:
+        counter.active[name] = True
 
     def compute(t1: Tensor, t2: Tensor):
         loss = l1_loss(t1, t2)
-        writer.add_scalar(name, loss, counter.get_iter(name))
+        if name:
+            writer.add_scalar(name, loss, counter.get_iter(name))
         return Loss(loss)
 
     return compute
 
 
+test_images, _ = next(iter(dataloader))
+test_images = test_images.cuda()
+test_noise = noise_gen.sample(args.batch_size)
+
+decoder = gan_model.generator.dec
+noise_to_latent = gan_model.generator.style
+
 for epoch in range(500):
 
     print("epoch", epoch)
+    if epoch > 0:
+        gan_model.model_save(f"/home/ibespalov/pomoika/gan_{epoch}n.pt")
+        torch.save(cont_style_encoder.enc_style.state_dict(), f"/home/ibespalov/pomoika/munit_style_encoder_{epoch}n.pt")
+        scheduler_1.step(epoch)
+        scheduler_2.step(epoch)
+        scheduler_3.step(epoch)
 
     for i, (imgs, masks) in enumerate(dataloader, 0):
         counter.update(i)
@@ -174,67 +192,51 @@ for epoch in range(500):
             continue
 
         imgs = imgs.cuda()
-        content, style = cont_style_encoder(imgs)
+        content, latent = cont_style_encoder(imgs)
 
-        pred_measures: ProbabilityMeasure = ProbabilityMeasure(
-            torch.ones(args.batch_size, 70, device=device) / 70,
-            content.reshape(args.batch_size, 70, 2) #.sigmoid()
-        )
+        noise = noise_gen.sample(args.batch_size)
+        fake = gan_model.generator(content.detach(), noise)
 
-        # if i == 1499:
-        #     print("saving model to /home/ibespalov/pomoika/munit_encoder.pt")
-        #     torch.save(cont_style_encoder.state_dict(), "/home/ibespalov/pomoika/munit_encoder.pt")
-        #
-        # if i < 1500:
-        #     (Whole_Reg.apply(i)(imgs, pred_measures) * 50).minimize_step(cont_style_opt)
-        #
-        #     if i % 100 == 0:
-        #         tensorboard_scatter(pred_measures.coord.cpu().detach(), writer, i)
-        #     continue
+        fake_latent = cont_style_encoder.enc_style(fake.detach())
+        L1("L1 style gan")(fake_latent, noise_to_latent(noise).detach()).__mul__(20).minimize_step(style_opt)
 
-        restored = gan_model.generator(content, style)
-        sohranennii_restored = restored.detach()
-        restored_content, _ = cont_style_encoder(restored)
+        fake_content, fake_latent = cont_style_encoder(fake)
 
-        (L1("L1 content")(restored_content, content.detach()) * 1).minimize_step(gan_model.optimizer.opt_min, retain_graph=True)
+        gan_model.loss_pair([imgs], [fake], content).add_min_loss(
+            L1("L1 content gan")(fake_content, content.detach()) * 5 +
+            L1("L1 style gan")(fake_latent, noise_to_latent(noise).detach()) * 10
+        ).minimize_step(gan_model.optimizer)
 
-        writer.add_scalar("style norm", (style ** 2).view(args.batch_size, -1).sum(dim=1).pow(0.5).max(), i)
+        # restore L1
+
+        restored = decoder(content, latent)
+        restored_content, restored_latent = cont_style_encoder(restored)
 
         (
-                L1("L1 image")(restored, imgs) * 10 +
-                (R_b + R_t)(imgs, pred_measures) * 10
-        ).minimize_step(gan_model.optimizer.opt_min, cont_style_opt)
-
-        content, _ = cont_style_encoder(imgs)
-        style_noise = noise.sample(args.batch_size)[:, :, None, None].tanh()
-        restored = gan_model.generator(content.detach(), style_noise)
-        restored_content, restored_style = cont_style_encoder(restored)
-
-        (L1("gan L1 style")(restored_style, style_noise.detach()) * 2).minimize_step(cont_style_opt, retain_graph=True)
+            L1("L1 image")(restored, imgs) * 20 +
+            L1("L1 content")(restored_content, content.detach()) * 2 +
+            L1("L1 style")(restored_latent, latent.detach()) * 2
+         ).minimize_step(gan_model.optimizer.opt_min, style_opt)
 
         if i % 100 == 0:
             with torch.no_grad():
-                grid = make_grid(restored[0:4], nrow=4, padding=2, pad_value=0, normalize=True, range=(-1, 1),
-                                 scale_each=False)
-                writer.add_image("RESTORED_QWADRAKOPTER", grid, i)
 
-                grid = make_grid(sohranennii_restored[0:4], nrow=4, padding=2, pad_value=0, normalize=True, range=(-1, 1),
-                                 scale_each=False)
-                writer.add_image("TRUE_QWADRAKOPTER", grid, i)
+                content, latent = cont_style_encoder(test_images)
+                pred_measures: ProbabilityMeasure = content_to_measure(content)
+                iwm = imgs_with_mask(test_images, pred_measures.toImage(256))
+                send_images_to_tensorboard(iwm, "IMGS WITH MASK", i)
 
-                grid = make_grid(imgs_with_mask(imgs, pred_measures.toImage(256))[0:4], nrow=4, padding=2, \
-                                 pad_value=0, normalize=True, range=(-1, 1),
-                                 scale_each=False)
-                writer.add_image("IMGS WITH MASK", grid, i)
+                fake = gan_model.generator(content.detach(), test_noise)
+                fwm = imgs_with_mask(fake, pred_measures.toImage(256))
+                send_images_to_tensorboard(fwm, "FAKE", i)
 
-                tensorboard_scatter(pred_measures.coord.cpu().detach(), writer, i)
+                restored = decoder(content, latent)
+                send_images_to_tensorboard(restored.detach(), "RESTORED", i)
 
-        (gan_model.loss_pair([imgs], [restored]).add_min_loss(
-            L1("gan L1 content")(restored_content, content.detach()) * 2 +
-            L1("gan L1 style")(restored_style, style_noise.detach()) * 2
-        )).minimize_step(gan_model.optimizer)
 
-        (gan_model.generator_loss([imgs], content, style_noise) * 0.2).minimize_step(cont_style_opt)
+
+
+
 
 
 

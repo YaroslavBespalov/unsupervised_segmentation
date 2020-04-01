@@ -44,7 +44,7 @@ args = parser.parse_args()
 for k in vars(args):
     print(f"{k}: {vars(args)[k]}")
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_device(device)
 
 image_size = 256
@@ -72,8 +72,11 @@ train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [len(f
 dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=20)
 
 
-cont_style_encoder: nn.Module = cont_style_munit_enc(args, "/home/ibespalov/pomoika/munit_encoder10.pt")
-cont_style_opt = torch.optim.Adam(cont_style_encoder.parameters(), lr=1e-5)
+cont_style_encoder: nn.Module = cont_style_munit_enc(args, "/home/ibespalov/pomoika/munit_content_encoder15.pt")
+cont_style_opt = torch.optim.Adam(cont_style_encoder.parameters(), lr=3e-5)
+
+# cont_encoder = cont_style_encoder.module[0]
+# torch.save(cont_encoder.state_dict(), "/home/ibespalov/pomoika/munit_content_encoder15.pt")
 
 counter = ItersCounter()
 writer = SummaryWriter(f"/home/ibespalov/pomoika/munit{int(time.time())}")
@@ -85,7 +88,7 @@ barycenter = fabric.load("/home/ibespalov/unsupervised_pattern_segmentation/exam
 g_transforms: albumentations.DualTransform = albumentations.Compose([
     MeasureToMask(size=256),
     ToNumpy(),
-    NumpyBatch(albumentations.ElasticTransform(p=0.5, alpha=100, alpha_affine=1, sigma=10)),
+    NumpyBatch(albumentations.ElasticTransform(p=0.5, alpha=150, alpha_affine=1, sigma=10)),
     NumpyBatch(albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10)),
     ToTensor(device),
     MaskToMeasure(size=256, padding=args.measure_size),
@@ -95,7 +98,7 @@ g_transforms: albumentations.DualTransform = albumentations.Compose([
 R_b = BarycenterRegularizer.__call__(barycenter)
 R_t = DualTransformRegularizer.__call__(
     g_transforms, lambda trans_dict:
-    Samples_Loss(scaling=0.89, p=1)(content_to_measure(cont_style_encoder(trans_dict['image'])[0]), trans_dict['mask'])
+    Samples_Loss(scaling=0.85, p=1)(content_to_measure(cont_style_encoder(trans_dict['image'])[0]), trans_dict['mask'])
 )
 
 R_b.forward = send_to_tensorboard("R_b", counter=counter, writer=writer)(R_b.forward)
@@ -105,7 +108,7 @@ R_t.forward = send_to_tensorboard("R_t", counter=counter, writer=writer)(R_t.for
 # Whole_Reg = R_t @ deform_array + R_b
 
 
-for i, (imgs, masks) in enumerate(dataloader, 10001):
+for i, (imgs, masks) in enumerate(dataloader, 15001):
     counter.update(i)
     if imgs.shape[0] != args.batch_size:
         continue

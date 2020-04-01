@@ -25,4 +25,4 @@ class MunitParameters(ArgumentParser):
         self.add_argument('--norm', type=str, default="none")
         self.add_argument('--mlp_dim', type=int, default=256)
         self.add_argument('--n_layer', type=int, default=8)
-        self.add_argument('--num_scales', type=int, default=3)
+        self.add_argument('--num_scales', type=int, default=1)

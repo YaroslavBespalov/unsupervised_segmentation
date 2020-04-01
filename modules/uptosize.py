@@ -4,7 +4,9 @@ from typing import List
 from torch import nn, Tensor
 import torch
 from torch.nn import functional as F
-from stylegan2.model import Blur, ConvLayer
+
+from models.common import View
+from stylegan2.model import Blur, ConvLayer, EqualLinear
 from stylegan2.op import FusedLeakyReLU
 
 
@@ -56,9 +58,12 @@ class Uptosize(nn.Module):
     def __init__(self, channel1, channel2, size2):
         super().__init__()
         modules = [
+            EqualLinear(channel1, channel1 * 16),
+            nn.LeakyReLU(0.2, inplace=True),
+            View(channel1, 4, 4),
             ScaledConvTranspose2d(channel1, channel1//2, 3)
         ]
-        tmp_size = 2
+        tmp_size = 8
         tmp_channel = channel1//2
         min_nc = 8
         while tmp_size < size2:
@@ -72,7 +77,7 @@ class Uptosize(nn.Module):
         self.main = nn.Sequential(*modules)
 
     def forward(self, input: Tensor):
-        return self.main(input.view(input.shape[0], input.shape[1], 1, 1))
+        return self.main(input) #.view(input.shape[0], input.shape[1], 1, 1))
 
 
 class UpsampleList(nn.Module):
