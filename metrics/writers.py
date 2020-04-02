@@ -22,6 +22,14 @@ def tensorboard_scatter(tensor : Tensor, writer: SummaryWriter, step: int):
     writer.add_figure('Measure', fig, global_step=step)
 
 
+def send_images_to_tensorboard(writer, data: Tensor, name: str, iter: int, count=8):
+    with torch.no_grad():
+        grid = make_grid(
+            data[0:count], nrow=count, padding=2, pad_value=0, normalize=True, range=(-1, 1),
+            scale_each=False)
+        writer.add_image(name, grid, iter)
+
+
 class ItersCounter:
 
     def __init__(self):
@@ -38,7 +46,7 @@ class ItersCounter:
         return self.__iter
 
 
-def send_to_tensorboard(*name2type: str, counter: ItersCounter, skip: int = 1, writer=SummaryWriter("runs")):
+def send_to_tensorboard(*name2type: str, counter: ItersCounter, skip: int = 1, writer): #SummaryWriter("runs")
 
     def decorator(fn):
         counter.active[str(fn)] = True

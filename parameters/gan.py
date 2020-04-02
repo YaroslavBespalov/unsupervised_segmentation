@@ -17,7 +17,7 @@ class MunitParameters(ArgumentParser):
         super().__init__(add_help=False, *args, **kwargs)
         self.add_argument('--input_dim', type=int, default=3)
         self.add_argument('--dim', type=int, default=16)
-        self.add_argument('--style_dim', type=int, default=256)
+        self.add_argument('--style_dim', type=int, default=256) #256
         self.add_argument('--n_downsample', type=int, default=2)
         self.add_argument('--n_res', type=int, default=4)
         self.add_argument('--activ', type=str, default="lrelu")
