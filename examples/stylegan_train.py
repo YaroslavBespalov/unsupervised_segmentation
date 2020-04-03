@@ -1,4 +1,8 @@
 import sys, os
+
+from gan.loss.gan_loss import StyleGANLoss
+from gan.loss.penalties.penalty import DiscriminatorPenalty
+
 sys.path.append(os.path.join(sys.path[0], '../'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
@@ -24,8 +28,8 @@ from tqdm import tqdm
 
 from dataset.cardio_dataset import ImageMeasureDataset
 from dataset.probmeasure import ProbabilityMeasure
-from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc
-from loss_base import Loss
+from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel
+from gan.loss_base import Loss
 from metrics.writers import ItersCounter, send_images_to_tensorboard
 from models.common import View
 from models.munit.enc_dec import MunitEncoder
@@ -143,26 +147,6 @@ def set_grad_none(model, targets):
         if n in targets:
             p.grad = None
 
-parser = argparse.ArgumentParser(
-    parents=[
-        DatasetParameters(),
-        GanParameters(),
-        DeformationParameters(),
-        MunitParameters()
-    ],
-    # formatter_class=argparse.ArgumentDefaultsHelpFormatter
-)
-munit_args = parser.parse_args()
-
-device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
-torch.cuda.set_device(device)
-
-cont_style_encoder: MunitEncoder = cont_style_munit_enc(
-    munit_args,
-    "/home/ibespalov/pomoika/munit_content_encoder15.pt",
-    None  # "/home/ibespalov/pomoika/munit_style_encoder_1.pt"
-)
-
 
 class CondGen2(nn.Module):
 
@@ -208,16 +192,18 @@ def imgs_with_mask(imgs, mask):
     return res
 
 
-def train(args, loader, generator, discriminator, g_optim, d_optim, device, g_ema):
+def train(args, loader, generator, discriminator, device, cont_style_encoder):
     loader = sample_data(loader)
 
     pbar = range(args.iter)
-    mean_path_length = 0
 
     sample_z = torch.randn(16, args.latent, device=device)
     test_img = next(loader)[0].to(device)
 
     writer = SummaryWriter(f"/home/ibespalov/pomoika/stylegan{int(time.time())}")
+
+    loss_st: StyleGANLoss = StyleGANLoss(discriminator)
+    model = CondStyleGanModel(generator, loss_st, (0.0015, 0.002))
 
     for idx in pbar:
         i = idx + args.start_iter
@@ -238,50 +224,61 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, device, g_em
         requires_grad(discriminator, True)
 
         noise = mixing_noise(args.batch, args.latent, args.mixing, device)
-        fake_img, _ = generator(content, noise)
+        # fake_img, _ = generator(content, noise)
+        #
+        # loss_st.discriminator_loss_with_penalty(
+        #     [real_img, content],
+        #     [fake_img.detach(), content]
+        # ).minimize_step(model.optimizer.opt_max)
+        noise_2 = mixing_noise(
+                    args.batch // 2, args.latent, args.mixing, device
+                )
+        model.train([real_img], content, noise)
 
-        fake_pred = discriminator(fake_img.detach(), content)
-        real_pred = discriminator(real_img.detach(), content)
+        print(i)
 
-        Loss(d_logistic_loss(real_pred, fake_pred)).minimize_step(d_optim)
+        # fake_pred = discriminator(fake_img.detach(), content)
+        # real_pred = discriminator(real_img, content)
+        #
+        # Loss(d_logistic_loss(real_pred, fake_pred)).minimize_step(d_optim)
+        #
+        # d_regularize = i % args.d_reg_every == 0
+        # if d_regularize:
+        #     real_img.requires_grad = True
+        #     content.requires_grad = True
+        #     real_pred = discriminator(real_img, content)
+        #     r1_loss = d_r1_loss(real_pred, real_img, content)
+        #     Loss(r1_loss * args.d_reg_every * args.r1 / 2).minimize_step(d_optim)
 
-        d_regularize = i % args.d_reg_every == 0
-        if d_regularize:
-            real_img.requires_grad = True
-            content.requires_grad = True
-            real_pred = discriminator(real_img, content)
-            r1_loss = d_r1_loss(real_pred, real_img, content)
-
-            Loss(args.r1 / 2 * r1_loss * args.d_reg_every).minimize_step(d_optim)
 
         # G train
 
-        requires_grad(generator, True)
-        requires_grad(discriminator, False)
+        # requires_grad(generator, True)
+        # requires_grad(discriminator, False)
 
-        fake_pred = discriminator(fake_img, content)
-        Loss(g_nonsaturating_loss(fake_pred)).minimize_step(g_optim)
+        # fake_pred = discriminator(fake_img, content)
+        # Loss(g_nonsaturating_loss(fake_pred)).minimize_step(model.optimizer.opt_min)
 
-        g_regularize = i % args.g_reg_every == 0
-        if g_regularize:
-            path_batch_size = max(1, args.batch // args.path_batch_shrink)
-            noise = mixing_noise(
-                path_batch_size, args.latent, args.mixing, device
-            )
+        # g_regularize = i % args.g_reg_every == 0
+        # if g_regularize:
+        #     path_batch_size = max(1, args.batch // args.path_batch_shrink)
+        #     noise = mixing_noise(
+        #         path_batch_size, args.latent, args.mixing, device
+        #     )
+        #
+        #     content.requires_grad = True
+        #     content_path = content[:path_batch_size]
+        #     fake_img, latents = generator(content_path, noise, return_latents=True)
+        #
+        #     path_loss, mean_path_length, path_lengths = g_path_regularize(
+        #         fake_img, latents, content_path, mean_path_length
+        #     )
+        #
+        #     Loss(args.path_regularize * args.g_reg_every * path_loss).minimize_step(model.optimizer.opt_min)
 
-            content.requires_grad = True
-            content_path = content[:path_batch_size]
-            fake_img, latents = generator(content_path, noise, return_latents=True)
+        # accumulate(g_ema, generator, 0.9)
 
-            path_loss, mean_path_length, path_lengths = g_path_regularize(
-                fake_img, latents, content_path, mean_path_length
-            )
-
-            Loss(args.path_regularize * args.g_reg_every * path_loss).minimize_step(g_optim)
-
-        accumulate(g_ema, generator, 0.9)
-
-        if i % 100 == 0:
+        if i % 100 == 0 and i > 0:
             with torch.no_grad():
                 content, _ = cont_style_encoder(test_img)
                 fake_img, _ = generator(content, [sample_z])
@@ -290,17 +287,17 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, device, g_em
                 iwm = imgs_with_mask(fake_img, pred_measures.toImage(256))
                 send_images_to_tensorboard(writer, iwm, "FAKE", i)
 
-                fake_img, _ = g_ema(content, [sample_z])
-                send_images_to_tensorboard(writer, fake_img, "FAKE EMA", i)
+                # fake_img, _ = g_ema(content, [sample_z])
+                # send_images_to_tensorboard(writer, fake_img, "FAKE EMA", i)
 
-        if i % 10000 == 0:
+        if i % 10000 == 0 and i > 0:
             torch.save(
                 {
                     'g': generator.state_dict(),
                     'd': discriminator.state_dict(),
-                    'g_ema': g_ema.state_dict(),
-                    'g_optim': g_optim.state_dict(),
-                    'd_optim': d_optim.state_dict(),
+                    # 'g_ema': g_ema.state_dict(),
+                    # 'g_optim': g_optim.state_dict(),
+                    # 'd_optim': d_optim.state_dict(),
                 },
                 f'/home/ibespalov/pomoika/stylegan2_measure_v_konce_{str(i).zfill(6)}.pt',
             )
@@ -327,6 +324,26 @@ if __name__ == '__main__':
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--local_rank', type=int, default=0)
     args = parser.parse_args()
+
+    parser = argparse.ArgumentParser(
+        parents=[
+            DatasetParameters(),
+            GanParameters(),
+            DeformationParameters(),
+            MunitParameters()
+        ],
+        # formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    munit_args = parser.parse_args()
+
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    torch.cuda.set_device(device)
+
+    cont_style_encoder: MunitEncoder = cont_style_munit_enc(
+        munit_args,
+        None, # "/home/ibespalov/pomoika/munit_content_encoder14.pt",
+        None  # "/home/ibespalov/pomoika/munit_style_encoder_1.pt"
+    ).to(device)
 
     args.latent = 512
     args.n_mlp = 4
@@ -381,14 +398,14 @@ if __name__ == '__main__':
         drop_last=True,
     )
 
-    g_ema = CondGen2(Generator(
-        args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
-    )).to(device)
-    g_ema.eval()
-    accumulate(g_ema, generator, 0)
+    # g_ema = CondGen2(Generator(
+    #     args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
+    # )).to(device)
+    # g_ema.eval()
+    # accumulate(g_ema, generator, 0)
 
-    weights = torch.load("/home/ibespalov/pomoika/stylegan2_030000.pt")
-    g_ema.load_state_dict(weights['g_ema'])
-    generator.load_state_dict(weights['g'])
+    # weights = torch.load("/home/ibespalov/pomoika/stylegan2_030000.pt")
+    # g_ema.load_state_dict(weights['g_ema'])
+    # generator.load_state_dict(weights['g'])
 
-    train(args, loader, generator, discriminator, g_optim, d_optim, device, g_ema)
+    train(args, loader, generator, discriminator, device, cont_style_encoder)
