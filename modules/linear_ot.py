@@ -9,7 +9,7 @@ from torch import Tensor
 import time
 
 from loss.losses import Samples_Loss
-from loss_base import Loss
+from gan.loss_base import Loss
 
 
 class PairwiseDistance(nn.Module):

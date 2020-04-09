@@ -120,7 +120,7 @@ args = parser.parse_args()
 for k in vars(args):
     print(f"{k}: {vars(args)[k]}")
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_device(device)
 
 image_size = 256
@@ -158,17 +158,17 @@ discriminator = CondStyleDisc2Wrapper(Discriminator(
 
 loss_st: StyleGANLoss = StyleGANLoss(discriminator)
 gan_model: CondStyleGanModel = CondStyleGanModel[CondGen2](generator, loss_st, (0.0007, 0.001))
-gan_path = '/home/ibespalov/pomoika/stylegan2_measure_v_konce_210000.pt'
-weights = (torch.load(gan_path, map_location='cpu'))
-gan_model.generator.load_state_dict(weights['g'])
+# gan_path = '/home/ibespalov/pomoika/stylegan2_measure_v_konce_210000.pt'
+# weights = (torch.load(gan_path, map_location='cpu'))
+# gan_model.generator.load_state_dict(weights['g'])
 gan_model.generator = gan_model.generator.cuda()
-gan_model.loss.discriminator.load_state_dict(weights['d'])
+# gan_model.loss.discriminator.load_state_dict(weights['d'])
 gan_model.loss.discriminator = gan_model.loss.discriminator.cuda()
 
 cont_style_encoder: MunitEncoder = cont_style_munit_enc(
     args,
-    "/home/ibespalov/pomoika/munit_content_encoder15.pt",
-    None  # "/home/ibespalov/pomoika/munit_style_encoder_1.pt"
+    # "/home/ibespalov/pomoika/munit_content_encoder15.pt",
+    # None  # "/home/ibespalov/pomoika/munit_style_encoder_1.pt"
 )
 
 style_opt = optim.Adam(cont_style_encoder.enc_style.parameters(), lr=1e-3, betas=(0.5, 0.9))
@@ -223,75 +223,81 @@ test_noise = mixing_noise(args.batch_size, args.latent, args.mixing, device)
 test_images, test_masks = next(iter(dataloader))
 test_images = test_images.cuda()
 test_masks = test_masks.cuda()
+test_content: ProbabilityMeasure = ProbabilityMeasureFabric(256).from_coord_tensor(test_masks).cuda().padding(70)
+test_content = test_content.coord.reshape(args.batch_size, 140).cuda()
 
 for epoch in range(500):
 
     print("epoch", epoch)
-    if epoch > 0:
-        gan_model.model_save(f"/home/ibespalov/pomoika/gan_{epoch}c.pt")
-        torch.save(cont_style_encoder.enc_style.state_dict(), f"/home/ibespalov/pomoika/munit_style_encoder_{epoch}c.pt")
+
+    # if epoch > 0:
+        # gan_model.model_save(f"/home/ibespalov/pomoika/gan_{epoch}c.pt")
+        # torch.save(cont_style_encoder.enc_style.state_dict(), f"/home/ibespalov/pomoika/munit_style_encoder_{epoch}c.pt")
 
     for i, (imgs, masks) in enumerate(dataloader, 0):
         counter.update(i)
         if imgs.shape[0] != args.batch_size:
             continue
 
+        masks: ProbabilityMeasure = ProbabilityMeasureFabric(256).from_coord_tensor(masks).cuda().padding(70)
+        content = masks.coord.reshape(args.batch_size, 140)
+
         imgs = imgs.cuda()
-        content, latent = cont_style_encoder(imgs)
+        # content_enc, latent = cont_style_encoder(imgs)
+        # (
+        #     L1("L1 content")(content_enc, content.detach())
+        # ).minimize_step(cont_opt)
 
         noise_1 = mixing_noise(args.batch_size, args.latent, args.mixing, device)
 
         gan_model.train([imgs], content, noise_1)
+        #
+        # noise = mixing_noise(args.batch_size, args.latent, args.mixing, device)
+        # fake, noise_latent = gan_model.generator(content.detach(), noise, return_latents=True)
+        # # noise_latent = noise_latent[:,[0,13], ...]
+        # #
+        # # fake_latent = cont_style_encoder.enc_style(fake)
+        # fake_content = cont_style_encoder.enc_content(fake)
+        #
+        # (L1("L1 content gan")(fake_content, content.detach()) * 10).minimize_step(gan_model.optimizer.opt_min, cont_opt)
 
-        noise = mixing_noise(args.batch_size, args.latent, args.mixing, device)
-        fake, noise_latent = gan_model.generator(content.detach(), noise, return_latents=True)
-        noise_latent = noise_latent[:,[0,13], ...]
+        # (L1("L1 content gan")(fake_content, content.detach()) * 50 +
+        #  L1("L1 style gan")(fake_latent, noise_latent.detach()).__mul__(10)).minimize_step(gan_model.optimizer.opt_min, style_opt)
 
-        fake_latent = cont_style_encoder.enc_style(fake)
-        fake_content = cont_style_encoder.enc_content(fake)
+        # if i > 300:
+        #
+        #     restored = gan_model.generator.decode(content, latent)
+        #     restored_content, restored_latent = cont_style_encoder(restored)
+        #
 
-        (L1("L1 content gan")(fake_content, content.detach()) * 50 +
-         L1("L1 style gan")(fake_latent, noise_latent.detach()).__mul__(10)).minimize_step(gan_model.optimizer.opt_min, style_opt)
-
-        if i > 300:
-
-            restored = gan_model.generator.decode(content, latent)
-            restored_content, restored_latent = cont_style_encoder(restored)
-
-            (
-                L1("L1 image")(restored, imgs) * 20 +
-                L1("L1 content")(restored_content, content.detach()) * 2 +
-                L1("L1 style")(restored_latent, latent.detach()) * 2
-             ).minimize_step(gan_model.optimizer.opt_min, style_opt)
-
-            content, latent = cont_style_encoder(imgs)
-            pred_measures = content_to_measure(content)
-            noise = mixing_noise(args.batch_size, args.latent, args.mixing, device)
-            fake, noise_latent = gan_model.generator(content, noise, return_latents=True)
-            (
-                    (R_b + R_t)(imgs, pred_measures) +
-                    gan_model.loss.generator_loss(fake=[fake, content.detach()], real=None) * 4
-            ).minimize_step(cont_opt)
+            # content, latent = cont_style_encoder(imgs)
+            # pred_measures = content_to_measure(content)
+            # noise = mixing_noise(args.batch_size, args.latent, args.mixing, device)
+            # fake, noise_latent = gan_model.generator(content, noise, return_latents=True)
+            # (
+            #         (R_b + R_t)(imgs, pred_measures) +
+            #         gan_model.loss.generator_loss(fake=[fake, content.detach()], real=None) * 4
+            # ).minimize_step(cont_opt)
 
         if i % 100 == 0:
             with torch.no_grad():
                 print(i)
 
-                content, latent = cont_style_encoder(test_images)
-                pred_measures: ProbabilityMeasure = content_to_measure(content)
-                ref_measures: ProbabilityMeasure = ProbabilityMeasureFabric(256).from_coord_tensor(test_masks).cuda()
+                # content, latent = cont_style_encoder(test_images)
+                pred_measures: ProbabilityMeasure = content_to_measure(test_content)
+                # ref_measures: ProbabilityMeasure = ProbabilityMeasureFabric(256).from_coord_tensor(test_masks).cuda()
                 iwm = imgs_with_mask(test_images, pred_measures.toImage(256))
                 send_images_to_tensorboard(iwm, "IMGS WITH MASK", i)
+                #
+                # print("pred:", Samples_Loss(p=1)(pred_measures, ref_measures).item())
+                # print("bc:", Samples_Loss(p=1)(barycenter, ref_measures).item())
 
-                print("pred:", Samples_Loss(p=1)(pred_measures, ref_measures).item())
-                print("bc:", Samples_Loss(p=1)(barycenter, ref_measures).item())
-
-                fake, _ = gan_model.generator(content.detach(), test_noise)
+                fake, _ = gan_model.generator(test_content.detach(), test_noise)
                 fwm = imgs_with_mask(fake, pred_measures.toImage(256))
                 send_images_to_tensorboard(fwm, "FAKE", i)
-
-                restored = gan_model.generator.decode(content.detach(), latent)
-                send_images_to_tensorboard(restored.detach(), "RESTORED", i)
+                #
+                # restored = gan_model.generator.decode(content.detach(), latent)
+                # send_images_to_tensorboard(restored.detach(), "RESTORED", i)
 
 
 

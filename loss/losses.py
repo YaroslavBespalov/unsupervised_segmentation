@@ -6,7 +6,7 @@ from torch.nn.functional import softmin
 
 from dataset.probmeasure import ProbabilityMeasure
 from geomloss import SamplesLoss
-from loss_base import Loss
+from gan.loss_base import Loss
 
 
 

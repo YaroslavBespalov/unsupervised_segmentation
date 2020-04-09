@@ -144,11 +144,11 @@ def clusterization(images: torch.Tensor, size=256, padding=70):
         sample_probs_value = np.array(sample_probs_value)
 
         # coord_result.append(sample_centroids_coords)
-        assert(sample_probs_value.sum() != 0)
-        assert(sample_probs_value.all() / sample_probs_value.sum() >= 0)
+        # assert(sample_probs_value.sum() != 0)
+        # assert(sample_probs_value.all() / sample_probs_value.sum() >= 0)
         # prob_result.append(sample_probs_value / sample_probs_value.sum())
 
-        return sample_centroids_coords,  sample_probs_value / sample_probs_value.sum()
+        return sample_centroids_coords,  sample_probs_value / (sample_probs_value.sum() + 1e-8)
 
     processed_list = Parallel(n_jobs=16)(delayed(compute)(i) for i in range(imgs.shape[0]))
 

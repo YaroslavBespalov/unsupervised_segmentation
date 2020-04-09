@@ -9,7 +9,7 @@ from torch import Tensor
 
 from dataset.probmeasure import ProbabilityMeasure
 from loss.losses import Samples_Loss
-from loss_base import Loss
+from gan.loss_base import Loss
 from modules.linear_ot import LinearTransformOT, SOT, PairwiseDistance
 
 
@@ -72,7 +72,7 @@ class DualTransformRegularizer:
 class BarycenterRegularizer:
 
     @staticmethod
-    def __call__(barycenter, ct: float = 0.1, ca: float = 0.3, cw: float = 10):
+    def __call__(barycenter, ct: float = 0.5, ca: float = 1.5, cw: float = 10):
 
         def loss(image: Tensor, mask: ProbabilityMeasure):
 
