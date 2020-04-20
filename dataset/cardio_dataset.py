@@ -96,20 +96,14 @@ class ImageMeasureDataset(Dataset):
         self.img_transform = img_transform
 
     def __getitem__(self, index):
-        image = Image.open(self.imgs[index]).convert('RGB')
+        image = np.array(Image.open(self.imgs[index]).convert('RGB'))
         mask = np.load(self.masks[index]).astype(np.int32)
 
-        measure = torch.from_numpy(
-            np.stack((np.where(mask)[0] / image.size[1],
-                      np.where(mask)[1] / image.size[0]), axis=1)).type(torch.float32)
+        dict_transfors = self.img_transform(image=image, mask=mask)
+        image = dict_transfors['image']
+        mask = dict_transfors['mask']
 
-        if measure.shape[0] < 68:
-            pad = -torch.ones(68 - measure.shape[0], 2, dtype=measure.dtype) * 10000
-            measure = torch.cat([measure, pad], dim=0)
-
-        if self.img_transform:
-            image = self.img_transform(image)
-        return image, measure
+        return image, mask
 
     def __len__(self):
         return len(self.masks)

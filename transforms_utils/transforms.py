@@ -89,18 +89,22 @@ class NumpyBatch(BasicTransform):
 
 
 class MaskToMeasure(DualTransform):
-    def __init__(self, size=256, padding=70, p=1.0):
+    def __init__(self, size=256, padding=140, p=1.0, clusterize=True):
         super(MaskToMeasure, self).__init__(p)
         self.size = size
         self.padding = padding
+        self.clusterize = clusterize
 
     def apply(self, img: torch.Tensor, **params):
         return img
 
     def apply_to_mask(self, img: torch.Tensor, **params):
-        res = clusterization(img,
-        size=self.size, padding=self.padding * 2)
-        return res
+        if self.clusterize:
+            res = clusterization(img,
+            size=self.size, padding=self.padding)
+            return res
+        else:
+            return ProbabilityMeasureFabric(self.size).from_mask(img).padding(self.padding)
 
 
 def clusterization(images: torch.Tensor, size=256, padding=70):

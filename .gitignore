@@ -20,7 +20,7 @@ ckpt
 # C extensions
 *.so
 
-superpixels/cache
+transforms_utils/superpixels/cache
 
 # Distribution / packaging
 .Python

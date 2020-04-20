@@ -26,9 +26,14 @@ class ToImage2D(nn.Module):
         indexes_cf = coord_0_c * size + coord_1_f
         indexes_cc = coord_0_c * size + coord_1_c
 
-        prob_ff = (coord_0 - coord_0_c).abs() * (coord_1 - coord_1_c).abs() * values
-        prob_fc = (coord_0 - coord_0_c).abs() * (coord_1 - coord_1_f).abs() * values
-        prob_cf = (coord_0 - coord_0_f).abs() * (coord_1 - coord_1_c).abs() * values
+        diff0c = (coord_0 - coord_0_c).abs()
+        diff0c[coord_0_c == coord_0_f] = 1
+        diff1c = (coord_1 - coord_1_c).abs()
+        diff1c[coord_1_c == coord_1_f] = 1
+
+        prob_ff = diff0c * diff1c * values
+        prob_fc = diff0c * (coord_1 - coord_1_f).abs() * values
+        prob_cf = (coord_0 - coord_0_f).abs() * diff1c * values
         prob_cc = (coord_0 - coord_0_f).abs() * (coord_1 - coord_1_f).abs() * values
 
         img = torch.zeros([batch, size * size], dtype=torch.float32, device=coord.device)

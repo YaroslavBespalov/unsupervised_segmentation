@@ -105,9 +105,9 @@ class ProbabilityMeasureFabric:
     def __from_one_mask(self, image: Tensor):
         assert(len(image.size()) == 2)
         weights = image.type(self.dtype)
-        indices = (weights > 1e-8).nonzero().type(self.dtype) / float(self.size)
+        indices = (weights > 1e-5).nonzero().type(self.dtype) / float(self.size)
         indices.view(-1,2)
-        values = torch.ones_like(weights)[weights > 1e-8].view(-1).type(self.dtype)
+        values = torch.ones_like(weights)[weights > 1e-5].view(-1).type(self.dtype)
         values = values/values.sum(dim=0)
         assert(indices.shape[1] == 2)
         return ProbabilityMeasure(values[None,], indices[None,])

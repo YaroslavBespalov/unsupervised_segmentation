@@ -1,11 +1,14 @@
 import sys, os
 
 import albumentations
+
 sys.path.append(os.path.join(sys.path[0], '../'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
+from albumentations.pytorch.transforms import ToTensor as AlbToTensor
+from loss.tuner import CoefTuner
 from gan.loss.gan_loss import StyleGANLoss
 from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
@@ -57,6 +60,47 @@ from stylegan2.model import Generator, Discriminator, EqualLinear, EqualConv2d
 #     reduce_sum,
 #     get_world_size,
 # )
+
+def tuning_process(args, tuner, loader, model, cont_style_encoder, R_b, R_t):
+    W2 = Samples_Loss(scaling=0.85, p=2)
+    real_img, masks = next(loader)
+    real_img = real_img.cuda()
+    masks: ProbabilityMeasure = MaskToMeasure(size=256, padding=140).apply_to_mask(masks).cuda()
+    # mask_content = masks.coord.reshape(args.batch, 140)
+
+    img_content = cont_style_encoder.enc_content(real_img).detach().requires_grad_(True)
+
+    noise1 = mixing_noise(args.batch, args.latent, args.mixing, device)
+    noise2 = mixing_noise(args.batch, args.latent, args.mixing, device)
+    fake1, _ = model.generator(img_content, noise1)
+    fake2, _ = model.generator(img_content, noise2)
+
+    cont_fake1 = cont_style_encoder.enc_content(fake1)
+    cont_fake2 = cont_style_encoder.enc_content(fake2)
+
+    img_latent = cont_style_encoder.enc_style(real_img)
+    restored = model.generator.decode(img_content, img_latent)
+
+    # noise = mixing_noise(args.batch, args.latent, args.mixing, real_img.device)
+    # fake, _ = generator(img_content, noise)
+    # fake_content_pred = cont_style_encoder.get_content(fake)
+
+    lr = 0.001
+
+    tuner.tune_module(
+        real_img,
+        cont_style_encoder.enc_content,
+        [
+            # model.loss.generator_loss(real=None, fake=[fake1, img_content.detach()]),
+            model.loss.generator_loss(real=None, fake=[real_img, img_content]),
+            R_b(real_img, content_to_measure(img_content)),
+            R_t(real_img, content_to_measure(img_content)),
+            L1("L1 content between fake")(cont_fake1, cont_fake2),
+            L1("L1 image")(restored, real_img)
+         ],
+        lambda x: W2(content_to_measure(x), masks) * 100,
+        lr=lr
+    )
 
 
 def data_sampler(dataset, shuffle, distributed):
@@ -160,11 +204,18 @@ def content_to_measure(content):
         )
     return pred_measures
 
-def imgs_with_mask(imgs, mask):
-    mask = torch.cat([mask, mask, mask], dim=1)
-    res = imgs.cpu().detach()
-    res[mask > 0.00001] = 1
+def imgs_with_mask(imgs, mask, color=[1.0,1.0,1.0]):
+    # mask = torch.cat([mask, mask, mask], dim=1)
+    mask = mask[:, 0, :, :]
+    res: Tensor = imgs.cpu().detach()
+    res = res.permute(0, 2, 3, 1)
+    res[mask > 0.00001, :] = torch.tensor(color, dtype=torch.float32)
+    res = res.permute(0, 3, 1, 2)
+
     return res
+
+
+
 
 counter = ItersCounter()
 writer = SummaryWriter(f"/home/ibespalov/pomoika/stylegan{int(time.time())}")
@@ -184,38 +235,51 @@ def L1(name: Optional[str], writer: SummaryWriter = writer) -> Callable[[Tensor,
     return compute
 
 
-def train(args, loader, generator, discriminator, device, cont_style_encoder):
+def train(args, loader, generator, discriminator, device, cont_style_encoder, starting_model_number):
     loader = sample_data(loader)
 
     pbar = range(args.iter)
 
     sample_z = torch.randn(args.batch, args.latent, device=device)
-    test_img = next(loader)[0].to(device)
+    test_img, test_mask = next(loader)
+    test_img = test_img.cuda()
+    test_mask = test_mask.cuda()
 
     loss_st: StyleGANLoss = StyleGANLoss(discriminator)
-    model = CondStyleGanModel(generator, loss_st, (0.007, 0.001))
+    model = CondStyleGanModel(generator, loss_st, (0.001, 0.0014))
 
-    style_opt = optim.Adam(cont_style_encoder.enc_style.parameters(), lr=1e-4, betas=(0.5, 0.9))
-    cont_opt = optim.Adam(cont_style_encoder.enc_content.parameters(), lr=1e-4, betas=(0.5, 0.9))
+    style_opt = optim.Adam(cont_style_encoder.enc_style.parameters(), lr=3e-4, betas=(0.5, 0.9))
+    cont_opt = optim.Adam(cont_style_encoder.enc_content.parameters(), lr=3e-5, betas=(0.5, 0.9))
 
     g_transforms: albumentations.DualTransform = albumentations.Compose([
         MeasureToMask(size=256),
         ToNumpy(),
-        NumpyBatch(albumentations.ElasticTransform(p=0.5, alpha=150, alpha_affine=1, sigma=10)),
+        NumpyBatch(albumentations.ElasticTransform(p=0.5, alpha=100, alpha_affine=1, sigma=10)),
         NumpyBatch(albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10)),
         ToTensor(device),
-        MaskToMeasure(size=256, padding=70),
+        MaskToMeasure(size=256, padding=140),
     ])
+
+    W1 = Samples_Loss(scaling=0.85, p=1)
+    # W2 = Samples_Loss(scaling=0.85, p=2)
+
+    # g_trans_res_dict = g_transforms(image=test_img, mask=MaskToMeasure(size=256, padding=140).apply_to_mask(test_mask))
+    # g_trans_img = g_trans_res_dict['image']
+    # g_trans_mask = g_trans_res_dict['mask']
+    # iwm = imgs_with_mask(g_trans_img, g_trans_mask.toImage(256), color=[1, 1, 1])
+    # send_images_to_tensorboard(writer, iwm, "RT", 0)
 
     R_t = DualTransformRegularizer.__call__(
         g_transforms, lambda trans_dict:
-        Samples_Loss(scaling=0.85, p=1)(content_to_measure(cont_style_encoder.enc_content(trans_dict['image'])),
-                                        trans_dict['mask'])
+        W1(content_to_measure(cont_style_encoder.get_content(trans_dict['image'])), trans_dict['mask']) #+
+        # W2(content_to_measure(cont_style_encoder.get_content(trans_dict['image'])), trans_dict['mask'])
     )
 
     fabric = ProbabilityMeasureFabric(256)
     barycenter = fabric.load("/raid/data/saved_models/barycenter/face_barycenter").cuda().padding(70).batch_repeat(args.batch)
     R_b = BarycenterRegularizer.__call__(barycenter)
+
+    tuner = CoefTuner([2, 10, 4, 0.3, 0.3], device=device)
 
     for idx in pbar:
         i = idx + args.start_iter
@@ -228,45 +292,75 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder):
         real_img = next(loader)[0]
         real_img = real_img.to(device)
 
-        img_content = cont_style_encoder.enc_content(real_img)
+        img_content = cont_style_encoder.get_content(real_img)
 
         noise = mixing_noise(args.batch, args.latent, args.mixing, device)
         img_content_variable = img_content.detach().requires_grad_(True)
         fake, fake_latent = generator(img_content_variable, noise, return_latents=True)
-        fake_content_pred = cont_style_encoder.enc_content(fake)
+        fake_detach = fake.detach()
+        fake_latent_test = fake_latent[:, [0, 13], :].detach()
+        fake_content_pred = cont_style_encoder.get_content(fake)
+
+        fake_latent_pred = cont_style_encoder.enc_style(fake)
 
         model.loss_pair([real_img], [fake], [fake_latent], img_content_variable).add_min_loss(
-            L1("L1 content gan")(fake_content_pred, img_content.detach()) * 1
+            L1("L1 content gan")(fake_content_pred, img_content.detach()) * 25 +
+            L1("L1 style gan")(fake_latent_pred, fake_latent_test) * 0.5
         ).minimize_step(
             model.optimizer
         )
 
         if i % 5 == 0:
+            fake_latent_pred = cont_style_encoder.enc_style(fake_detach)
+            L1("L1 style gan")(fake_latent_pred, fake_latent_test).minimize_step(style_opt)
+            img_latent = cont_style_encoder.enc_style(real_img)
+            restored = model.generator.decode(img_content, img_latent)
             pred_measures: ProbabilityMeasure = content_to_measure(img_content)
-            (
-                    model.loss.generator_loss(real=None, fake=[real_img, img_content]) * 3 +
-                    (R_b + R_t * 0.4)(real_img, pred_measures) * 2
-            ).minimize_step(cont_opt)
 
-        # restored = model.generator.decode(img_content, img_latent)
-        # model.train([real_img], img_content, noise)
-        # fake_latent_pred_style = cont_style_encoder.enc_style(fake.detach())
-        # (
-        #         L1("L1 style gan")(fake_latent_pred_style, fake_latent[:, [0, 13], :].detach()) * 1 +
-        #         L1("L1 image")(restored, real_img) * 2
-        # ).minimize_step(
-        #     cont_opt,
-        #     style_opt,
-        #     model.optimizer.opt_min
-        # )
+            noise1 = mixing_noise(args.batch, args.latent, args.mixing, device)
+            noise2 = mixing_noise(args.batch, args.latent, args.mixing, device)
+            fake1, _ = generator(img_content, noise1)
+            fake2, _ = generator(img_content, noise2)
 
-        print(i)
+            cont_fake1 = cont_style_encoder.enc_content(fake1)
+            cont_fake2 = cont_style_encoder.enc_content(fake2)
+
+            #TUNER PART
+            tuner.sum_losses([
+                # model.loss.generator_loss(real=None, fake=[fake1, img_content.detach()]),
+                model.loss.generator_loss(real=None, fake=[real_img, img_content]),
+                R_b(real_img, pred_measures),
+                R_t(real_img, pred_measures),
+                L1("L1 content between fake")(cont_fake1, cont_fake2),
+                L1("L1 image")(restored, real_img)
+            ]).minimize_step(
+                cont_opt,
+                model.optimizer.opt_min
+            )
+
+            ##Without tuner part
+
+            # (
+            #         model.loss.generator_loss(real=None, fake=[real_img, img_content]) * 5 +
+            #         (R_b + R_t * 0.4)(real_img, pred_measures) * 10 +
+            #         L1("L1 content between fake")(cont_fake1, cont_fake2) * 1 +
+            #         L1("L1 image")(restored, real_img) * 1
+            #         # L1("L1 style gan")(fake_latent_pred, fake_latent_test) * 1
+            # ).minimize_step(
+            #     cont_opt,
+            #     model.optimizer.opt_min
+            # )
+
+
 
         if i % 100 == 0:
+            print(i)
             with torch.no_grad():
                 content, latent = cont_style_encoder(test_img)
                 pred_measures: ProbabilityMeasure = content_to_measure(content)
-                iwm = imgs_with_mask(test_img, pred_measures.toImage(256))
+                ref_measures: ProbabilityMeasure = MaskToMeasure(size=256, padding=140).apply_to_mask(test_mask)
+                iwm = imgs_with_mask(test_img, ref_measures.toImage(256), color=[0, 0, 1])
+                iwm = imgs_with_mask(iwm, pred_measures.toImage(256), color=[1, 1, 1])
                 send_images_to_tensorboard(writer, iwm, "REAL", i)
 
                 fake_img, _ = generator(content, [sample_z])
@@ -275,8 +369,15 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder):
                 restored = model.generator.decode(content, latent)
                 send_images_to_tensorboard(writer, restored, "RESTORED", i)
 
-                # fake_img, _ = g_ema(content, [sample_z])
-                # send_images_to_tensorboard(writer, fake_img, "FAKE EMA", i)
+        if i % 100 == 0:
+            for ten_raz in range(20):
+                try:
+                    tuning_process(args, tuner, loader, model, cont_style_encoder, R_b, R_t)
+                except Exception as e:
+                    print(e)
+
+            print("coefficients: ", tuner.coefs.detach().cpu().numpy())
+
 
         if i % 10000 == 0 and i > 0:
             torch.save(
@@ -288,7 +389,7 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder):
                     # 'g_optim': g_optim.state_dict(),
                     # 'd_optim': d_optim.state_dict(),
                 },
-                f'/home/ibespalov/pomoika/stylegan2_invertable_{str(i).zfill(6)}.pt',
+                f'/home/ibespalov/pomoika/stylegan2_invertable_{str(i + starting_model_number).zfill(6)}.pt',
             )
 
 
@@ -325,7 +426,7 @@ if __name__ == '__main__':
     )
     munit_args = parser.parse_args()
 
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
     print(device)
     torch.cuda.set_device(device)
 
@@ -333,7 +434,7 @@ if __name__ == '__main__':
         munit_args,
         None, # "/home/ibespalov/pomoika/munit_content_encoder15.pt",
         None  # "/home/ibespalov/pomoika/munit_style_encoder_1.pt"
-    ).to(device)
+    )#.to(device)
 
     args.latent = 512
     args.n_mlp = 5
@@ -342,11 +443,11 @@ if __name__ == '__main__':
 
     generator = CondGen2(Generator(
         args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
-    )).to(device)
+    ))#.to(device)
 
     discriminator = CondStyleDisc2Wrapper(Discriminator(
         args.size, channel_multiplier=args.channel_multiplier
-    )).to(device)
+    ))#.to(device)
 
     g_reg_ratio = args.g_reg_every / (args.g_reg_every + 1)
     d_reg_ratio = args.d_reg_every / (args.d_reg_every + 1)
@@ -363,23 +464,26 @@ if __name__ == '__main__':
     )
 
     image_size = args.size
-    transform = transforms.Compose(
+    transform = albumentations.Compose(
         [
-            transforms.RandomHorizontalFlip(),
-            transforms.Resize((image_size, image_size)),
-            transforms.RandomAffine(degrees=10, scale=(0.9, 1.1), translate=(0.05, 0.05)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            albumentations.HorizontalFlip(),
+            albumentations.Resize(image_size, image_size),
+            albumentations.ElasticTransform(p=0.5, alpha=100, alpha_affine=1, sigma=10),
+            albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10),
+            albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            AlbToTensor()
         ]
     )
 
-    dataset = ImageFolder("/raid/data/celeba", transform=transform)
 
-    # dataset = ImageMeasureDataset(
-    #     "/raid/data/celeba",
-    #     "/raid/data/celeba_masks",
-    #     img_transform=transform
-    # )
+
+    # dataset = ImageFolder("/raid/data/celeba", transform=transform)
+
+    dataset = ImageMeasureDataset(
+        "/raid/data/celeba",
+        "/raid/data/celeba_masks",
+        img_transform=transform
+    )
 
     loader = data.DataLoader(
         dataset,
@@ -394,9 +498,14 @@ if __name__ == '__main__':
     # g_ema.eval()
     # accumulate(g_ema, generator, 0)
 
-    # weights = torch.load("/home/ibespalov/pomoika/stylegan2_invertable_010000.pt")
-    # generator.load_state_dict(weights['g'])
-    # discriminator.load_state_dict(weights['d'])
-    # cont_style_encoder.load_state_dict(weights['enc'])
+    starting_model_number = 320000
+    weights = torch.load(f"/home/ibespalov/pomoika/stylegan2_invertable_{starting_model_number}.pt", map_location="cpu")
+    generator.load_state_dict(weights['g'])
+    discriminator.load_state_dict(weights['d'])
+    cont_style_encoder.load_state_dict(weights['enc'])
 
-    train(args, loader, generator, discriminator, device, cont_style_encoder)
+    generator = generator.to(device)
+    discriminator = discriminator.to(device)
+    cont_style_encoder = cont_style_encoder.to(device)
+
+    train(args, loader, generator, discriminator, device, cont_style_encoder, starting_model_number)

@@ -72,7 +72,7 @@ class DualTransformRegularizer:
 class BarycenterRegularizer:
 
     @staticmethod
-    def __call__(barycenter, ct: float = 0.5, ca: float = 1.5, cw: float = 10):
+    def __call__(barycenter, ct: float = 0.5, ca: float = 1, cw: float = 10):
 
         def loss(image: Tensor, mask: ProbabilityMeasure):
 
