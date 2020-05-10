@@ -5,15 +5,15 @@ from PIL import Image
 from torch import nn, Tensor
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
-
-import matplotlib.pyplot as plt
 import numpy as np
 
-from loss_base import Loss
+from gan.loss_base import Loss
 from optim.min_max import MinMaxLoss
 
 
 def tensorboard_scatter(tensor : Tensor, writer: SummaryWriter, step: int):
+    import matplotlib.pyplot as plt
+
     x, y = tensor[:, :, 0], tensor[:, :, 1]
     plt.switch_backend('agg')
     fig, ax = plt.subplots(1, 4, figsize=(16, 4))

@@ -64,15 +64,23 @@ class DualTransformRegularizer:
 
     @staticmethod
     def __call__(transform: DualTransform,
-                 loss: Callable[[Dict[str, object]], Loss]):
+                 loss: Callable[[Dict[str, object], Tensor], Loss]):
 
-        return RegularizerObject.__call__(lambda image, mask: loss(transform(image=image, mask=mask)))
+        return RegularizerObject.__call__(lambda image, mask: loss(transform(image=image, mask=mask), image))
+
+class StyleTransformRegularizer:
+
+    @staticmethod
+    def __call__(transform: DualTransform,
+                 loss: Callable[[Dict[str, object], Tensor], Loss]):
+
+        return RegularizerObject.__call__(lambda image: loss(transform(image=image), image))
 
 
 class BarycenterRegularizer:
 
     @staticmethod
-    def __call__(barycenter, ct: float = 0.5, ca: float = 1, cw: float = 10):
+    def __call__(barycenter, ct: float = 1, ca: float = 2, cw: float = 10):
 
         def loss(image: Tensor, mask: ProbabilityMeasure):
 
@@ -81,9 +89,9 @@ class BarycenterRegularizer:
             with torch.no_grad():
                 A, T = LinearTransformOT.forward(mask, barycenter, 100)
 
-            t_loss = Samples_Loss(scaling=0.8, border=0.001)(mask, mask.detach() + T)
-            a_loss = Samples_Loss(scaling=0.8, border=0.001)(mask.centered(), mask.centered().multiply(A).detach())
-            w_loss = Samples_Loss(scaling=0.8, border=0.0002)(mask.centered().multiply(A), barycenter.centered().detach())
+            t_loss = Samples_Loss(scaling=0.8, border=0.0001)(mask, mask.detach() + T)
+            a_loss = Samples_Loss(scaling=0.8, border=0.0001)(mask.centered(), mask.centered().multiply(A).detach())
+            w_loss = Samples_Loss(scaling=0.8, border=0.00001)(mask.centered().multiply(A), barycenter.centered().detach())
 
             # print(time.time() - t1)
 

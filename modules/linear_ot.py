@@ -1,10 +1,7 @@
 from torch import nn
 import torch
 from dataset.probmeasure import ProbabilityMeasure
-import numpy as np
 
-from geomloss import SamplesLoss
-import matplotlib.pyplot as plt
 from torch import Tensor
 import time
 

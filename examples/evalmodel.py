@@ -28,7 +28,7 @@ import matplotlib.image as mpimg
 
 # %%
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 print(device)
 torch.cuda.set_device(device)
 
@@ -107,11 +107,11 @@ cont_style_encoder2: MunitEncoder = cont_style_munit_enc(
 
 import torch
 
-weights = torch.load(f"/home/ibespalov/pomoika/stylegan2_invertable_320000.pt", map_location='cpu')
+weights = torch.load(f"/home/ibespalov/pomoika/stylegan2_invertable_230000.pt", map_location='cpu')
 cont_style_encoder.load_state_dict(weights['enc'])
 cont_style_encoder = cont_style_encoder.cuda()
 
-weights2 = torch.load(f"/home/ibespalov/pomoika/stylegan2_invertable_330000.pt", map_location='cpu')
+weights2 = torch.load(f"/home/ibespalov/pomoika/stylegan2_igor_2.pt", map_location='cpu')
 cont_style_encoder2.load_state_dict(weights2['enc'])
 cont_style_encoder2 = cont_style_encoder2.cuda()
 
@@ -126,7 +126,7 @@ def content_to_measure(content):
 
 
 fabric = ProbabilityMeasureFabric(256)
-barycenter = fabric.load("/raid/data/saved_models/barycenter/face_barycenter").cuda().padding(70).batch_repeat(8)
+barycenter = fabric.load("/raid/data/saved_models/barycenter/face_barycenter").cuda().padding(70).transpose().batch_repeat(8)
 
 err_pred_list = []
 err_pred_list_2 = []
@@ -137,9 +137,9 @@ for i in range(30):
     test_img, test_mask = next(loader)
     test_img = test_img.cuda()
 
-    content = cont_style_encoder.enc_content(test_img)
+    content = cont_style_encoder.get_content(test_img)
     pred_measures: ProbabilityMeasure = content_to_measure(content)
-    content2 = cont_style_encoder2.enc_content(test_img)
+    content2 = cont_style_encoder2.get_content(test_img)
     pred_measures2: ProbabilityMeasure = content_to_measure(content2)
 
     ref_measure = MaskToMeasure(size=256, padding=140, clusterize=True)(image=test_img, mask=test_mask)["mask"].cuda()

@@ -22,6 +22,9 @@ class ProbabilityMeasure:
         prob /= prob.sum(dim=1, keepdim=True)
         return ProbabilityMeasure(prob, self.coord[:, 0:size, :])
 
+    def transpose(self):
+        return ProbabilityMeasure(self.probability, self.coord[:, :, [1, 0]])
+
     def padding(self, size):
         coord_pad = torch.zeros((self.coord.shape[0],size - self.coord.shape[1], self.coord.shape[2]), device=self.device)
         prob_pad = torch.zeros((self.probability.shape[0], size - self.probability.shape[1]), device=self.device)
@@ -75,7 +78,7 @@ class ProbabilityMeasure:
 
     def toImage(self, size: int) -> Tensor:
         coord = self.coord * size
-        return ToImage2D(size)(self.probability, coord)
+        return ToImage2D(size)(self.probability, coord).transpose(2,3)
 
     def toChannels(self) -> Tensor:
 
@@ -106,6 +109,7 @@ class ProbabilityMeasureFabric:
         assert(len(image.size()) == 2)
         weights = image.type(self.dtype)
         indices = (weights > 1e-5).nonzero().type(self.dtype) / float(self.size)
+        indices = indices[:,[1,0]]
         indices.view(-1,2)
         values = torch.ones_like(weights)[weights > 1e-5].view(-1).type(self.dtype)
         values = values/values.sum(dim=0)
