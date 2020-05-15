@@ -1,7 +1,6 @@
 from typing import Optional
 
 import albumentations
-import lazy_property
 import torch
 from torch import nn, Tensor
 from torch.utils import data
@@ -30,6 +29,7 @@ def sample_data(loader):
 class W300DatasetLoader:
 
     batch_size = 8
+    test_batch_size = 32
 
     def __init__(self):
         dataset_train = ThreeHundredW("/raid/data/300w", train=True, imwidth=500, crop=15)
@@ -48,7 +48,7 @@ class W300DatasetLoader:
 
         self.test_loader = data.DataLoader(
             self.test_dataset,
-            batch_size=32,
+            batch_size=W300DatasetLoader.test_batch_size,
             drop_last=True,
             num_workers=20
         )

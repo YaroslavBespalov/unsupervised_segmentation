@@ -318,7 +318,8 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder, st
     #                 [6.5, 7.9, 2.7, 2.06, 5.4, 0.7, 2.04]
     #                  3.3, 10.5,  6.2,  1.14, 10.88,  0.93,  2.6
     #                  4.3, 10.3, 5.9, 0.85, 10.1, 0.27, 4.5
-    tuner = GoldTuner([4.3, 10.3, 6.0, 1.0, 10.2, 0.5, 4.0], device=device, rule_eps=0.05, radius=1, active=True)
+    #                  [4.53, 9.97, 5.5, 0.01, 9.44, 1.05, 4.9
+    tuner = GoldTuner([4.53, 9.97, 5.5, 0.01, 9.44, 1.05, 4.9], device=device, rule_eps=0.05, radius=1, active=False)
     gan_tuner = GoldTuner([70, 5, 22], device=device, rule_eps=1, radius=20, active=False)
 
     # rb_tuner = GoldTuner([0.7, 1.5, 10], device=device, rule_eps=0.02, radius=0.5)
@@ -365,7 +366,7 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder, st
             style_opt
         )
 
-        if i % 10 == 0:
+        if i % 20 == 0:
             # fake_latent_pred = cont_style_encoder.enc_style(fake_detach)
             # (L1("L1 style gan")(fake_latent_pred, fake_latent_test)).__mul__(2).minimize_step(style_opt)
             img_latent = cont_style_encoder.enc_style(real_img)
@@ -431,7 +432,7 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder, st
                 restored = model.generator.decode(content, latent)
                 send_images_to_tensorboard(writer, restored, "RESTORED", i)
 
-        if i % 50 == 0 and i > 0:
+        if i % 100 == 0 and i > 0:
             with torch.no_grad():
                 igor = test(cont_style_encoder, test_pairs)
                 writer.add_scalar("test error", igor, i)

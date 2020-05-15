@@ -18,19 +18,24 @@ import matplotlib.pyplot as plt
 
 def center_by_face(image: torch.Tensor, landmarks: torch.Tensor):
     image, landmarks = np.transpose(image.numpy(), (1,2,0)), landmarks.numpy()
-    y_center = int(landmarks[36][0] + landmarks[45][0]) // 2
-    x_center = int(landmarks[:,1].mean().item())
+    # y_center = int(landmarks[36][0] + landmarks[45][0]) // 2
+    # x_center = int(landmarks[:,1].mean().item())
     y, x = landmarks[:,0], landmarks[:,1]
     keypoints_landmarks = [x, y, 0, 1]
+    # H, W, C = image.shape
+    # W_max = min(x_center, W - x_center)
+    # H_max = min(y_center, H - y_center)
+    # radius = min(W_max, H_max)
+    # y_max, y_min = min(H, y_center + H//2), max(0, y_center - H//2)
+    # x_max, x_min = min(W, x_center + W//2), max(0, x_center - W//2)
     H, W, C = image.shape
-    W_max = min(x_center, W - x_center)
-    H_max = min(y_center, H - y_center)
-    radius = min(W_max, H_max)
-    y_max, y_min = min(H, y_center + H//2), max(0, y_center - H//2)
-    x_max, x_min = min(W, x_center + W//2), max(0, x_center - W//2)
+    H09 = int(H * 0.9)
+    rh = max(int(270 * H09 / W), 270)
+    rw = max(int(270 * W / H09), 270)
     transforms = albumentations.Compose([
-        albumentations.Crop(x_min=x_min, y_min=y_min, x_max=x_max, y_max=y_max),
-        albumentations.Resize(256, 256)
+        albumentations.Crop(x_min=0, y_min=0, x_max=W, y_max=H09),
+        albumentations.Resize(rh, rw),
+        albumentations.RandomCrop(256, 256)
     ])
     data_dict = transforms(image=image, keypoints=[keypoints_landmarks])
     image_new = torch.tensor(np.transpose(data_dict['image'], (2,0,1)))
@@ -53,8 +58,8 @@ def norm_range(t, range=None):
 
 def kp_normalize(H, W, kp):
     kp = kp.clone()
-    kp[..., 0] = kp[..., 0] / W
-    kp[..., 1] = kp[..., 1] / H
+    kp[..., 0] = kp[..., 0] / (W-1)
+    kp[..., 1] = kp[..., 1] / (H-1)
     return kp
 
 def pad_and_crop(im, rr):
