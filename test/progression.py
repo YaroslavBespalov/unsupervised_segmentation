@@ -6,8 +6,8 @@ import torch
 from torch import nn, Tensor
 
 from model import StyledConv, ToRGB
-from models.unet.progressive import ProgressiveModuleList, CollectionCat, ProgressiveWithStateInit, \
-    ProgressiveSequential
+from models.unet.la_divina_progressiya import Progressive,  ProgressiveWithStateInit, \
+    ProgressiveSequential, InjectLast, InjectByName
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
@@ -32,8 +32,6 @@ ml = [
             TestProgMod(),
             TestProgMod(),
             TestProgMod(),
-            TestProgModWithoutInput(),
-            TestProgModWithoutInput()
         ]
 
 dict_ml = [
@@ -52,10 +50,15 @@ state_init = torch.randn(2, 3, 2)
 
 dict_state_init = {'state': torch.randn(2, 3)}
 
-dict_input = [
-    {'t1': torch.randn(2, 3), 't2': torch.randn(2, 3)},
-    {'t1': torch.randn(2, 3), 't2': torch.randn(2, 3)},
-    {'t1': torch.randn(2, 3), 't2': torch.randn(2, 3)}
+t1_input = [
+    torch.randn(2, 3),
+    torch.randn(2, 3),
+    torch.randn(2, 3),
+]
+t2_input = [
+    torch.randn(2, 3),
+    torch.randn(2, 3),
+    torch.randn(2, 3),
 ]
 
 class TestSimpleProgression(unittest.TestCase):
@@ -68,22 +71,12 @@ class TestSimpleProgression(unittest.TestCase):
             state = ml[i](input[i], state)
             res_output_first.append(state)
 
-        for i in range(3, 5, 1):
-            state = ml[i](state)
-            res_output_first.append(state)
+        pr = Progressive[List[Tensor]](ml, InjectLast())
 
-
-        # print("==================================")
-
-        pr = ProgressiveModuleList[Tensor, List[Tensor]](ml, CollectionCat[Tensor]())
-
-        res_list = pr.forward(input, state_init)
+        res_list = pr.forward(state_init, input)
 
         i = 0
         for rr in res_list:
-            # print("out ", i)
-            # print(rr)
-            # print(res_output_first[i])
             self.assertAlmostEqual((rr - res_output_first[i]).abs().max().item(), 0, delta=1e-5)
             i += 1
 
@@ -92,25 +85,22 @@ class TestSimpleProgression(unittest.TestCase):
         state = dict_state_init['state']
         res_output_first = []
         for i in range(3):
-            state = dict_ml[i](dict_input[i]['t1'], state, dict_input[i]['t2'])
+            state = dict_ml[i](t1_input[i], state, t2_input[i])
             res_output_first.append(state)
 
-        print("==================================")
+        pr = Progressive[List[Tensor]](
+            dict_ml,
+            InjectByName("state")
+        )
 
-        pr = ProgressiveModuleList[Dict[str, Tensor], List[Tensor]](dict_ml, CollectionCat[Dict[str, Tensor]]())
-
-        res_list = pr.forward(dict_input, dict_state_init)
+        res_list = pr.forward(state=dict_state_init['state'], t1=t1_input, t2=t2_input)
 
         i = 0
         for rr in res_list:
-            # print("out ", i)
-            # print(rr)
-            # print(res_output_first[i])
             self.assertAlmostEqual((rr - res_output_first[i]).abs().max().item(), 0, delta=1e-5)
             i += 1
 
-
-    def test_styleganich_test(self):
+    def test_styleganich(self):
         print("AKULELE")
         channels = {
             4: 64,
@@ -184,20 +174,22 @@ class TestSimpleProgression(unittest.TestCase):
 
 
         dict_ml = [conv1] + convs
-        input_dict = [{'noise': noise[i], 'style': latent[:,i,:]} for i in range(len(convs)+1)]
-        state = {'input': init_state}
-        pr = ProgressiveModuleList[Dict[str, Tensor], List[Tensor]](dict_ml, CollectionCat[Dict[str, Tensor]]())
-        progessive_out = pr.forward(input_dict, state)
+        # input_dict = [{'noise': noise[i], 'style': latent[:,i,:]} for i in range(len(convs)+1)]
+        style_list = [latent[:, i] for i in range(len(convs)+1)]
+
+        pr = Progressive[List[Tensor]](dict_ml, InjectByName("input"))
+        progessive_out = pr.forward(init_state, noise=noise, style=style_list)
         for i in range(len(progessive_out)):
             self.assertAlmostEqual((main_out[i] - progessive_out[i]).abs().max().item(), 0, delta=1e-5)
 
         pr2_with_init = ProgressiveWithStateInit(
-            to_rgb1, "skip",
-            ProgressiveModuleList[Dict[str, Tensor], List[Tensor]](to_rgbs, CollectionCat[Dict[str, Tensor]]())
+            to_rgb1,
+            Progressive[List[Tensor]](to_rgbs, InjectByName("skip"))
         )
 
-        input_dict2_with_1 = [{'input': progessive_out[i - 1], 'style': latent[:, i, :]} for i in range(1, len(convs) + 2, 2)]
-        progessive_skip_1 = pr2_with_init.forward(input_dict2_with_1)
+        style_list_1 = [latent[:, i, :] for i in range(1, len(convs) + 2, 2)]
+        input_list_1 = [progessive_out[i-1] for i in range(1, len(convs) + 2, 2)]
+        progessive_skip_1 = pr2_with_init.forward(input=input_list_1, style=style_list_1)
 
         self.assertAlmostEqual((skip - progessive_skip_1[-1]).abs().max().item(), 0, delta=1e-5)
 
