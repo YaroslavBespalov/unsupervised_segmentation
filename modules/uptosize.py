@@ -10,7 +10,7 @@ from stylegan2.model import Blur, ConvLayer, EqualLinear
 from stylegan2.op import FusedLeakyReLU
 
 
-class ScaledConvTranspose2d(nn.Module):
+class ScaledConvTranspose2d_our(nn.Module):
     def __init__(
         self,
         in_channel,

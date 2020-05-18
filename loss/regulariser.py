@@ -68,6 +68,16 @@ class DualTransformRegularizer:
 
         return RegularizerObject.__call__(lambda image, mask: loss(transform(image=image, mask=mask), image))
 
+
+class UnoTransformRegularizer:
+
+    @staticmethod
+    def __call__(transform: DualTransform,
+                 loss: Callable[[Dict[str, object], Tensor, Tensor], Loss]):
+
+        return RegularizerObject.__call__(lambda image, latent: loss(transform(image=image), image, latent))
+
+
 class StyleTransformRegularizer:
 
     @staticmethod

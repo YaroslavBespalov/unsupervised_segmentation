@@ -569,4 +569,6 @@ if __name__ == '__main__':
     discriminator = discriminator.to(device)
     cont_style_encoder = cont_style_encoder.to(device)
 
+
+
     train(args, loader, generator, discriminator, device, cont_style_encoder, starting_model_number)

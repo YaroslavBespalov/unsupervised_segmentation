@@ -77,8 +77,8 @@ class ProbabilityMeasure:
         return ProbabilityMeasure(self.probability[i1:i2], self.coord[i1:i2])
 
     def toImage(self, size: int) -> Tensor:
-        coord = self.coord * size
-        return ToImage2D(size)(self.probability, coord).transpose(2,3)
+        coord = self.coord * (size-1)
+        return ToImage2D(size)(self.probability, coord).transpose(2, 3)
 
     def toChannels(self) -> Tensor:
 

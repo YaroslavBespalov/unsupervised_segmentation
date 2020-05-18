@@ -4,8 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import logging
+from torch import Tensor
+from typing import List
+from dataset.toheatmap import ToHeatMap, heatmap_to_measure
 
-import torch
 
 
 def get_preds(scores):
@@ -289,6 +291,28 @@ def hg4(pretrained=False, progress=True, num_blocks=1, num_classes=16):
 def hg8(pretrained=False, progress=True, num_blocks=1, num_classes=16):
     return _hg('hg8', pretrained, progress, num_stacks=8, num_blocks=num_blocks,
                num_classes=num_classes)
+
+
+class HG_softmax2020(nn.Module):
+
+    def __init__(self, num_classes=68, heatmap_size=64):
+        super().__init__()
+        self.num_classes = num_classes
+        self.heatmap_size = heatmap_size
+        self.model = hg2(num_classes=self.num_classes, num_blocks=1)
+
+    def forward(self, image: Tensor):
+        B, C, D, D = image.shape
+        heatmaps: List[Tensor] = self.model.forward(image)
+        return heatmaps[-1].view(B, self.num_classes, -1)\
+                   .softmax(dim=2)\
+                   .view(B, self.num_classes, self.heatmap_size, self.heatmap_size) / self.num_classes
+
+    def return_coords(self, image: Tensor):
+        heatmaps = self.forward(image)
+        coords, p = heatmap_to_measure(heatmaps)
+        return coords
+
 
 
 if __name__ == '__main__':

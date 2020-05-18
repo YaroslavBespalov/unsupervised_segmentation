@@ -1,4 +1,5 @@
 import time
+from typing import Dict
 
 import torch
 import numpy as np
@@ -79,37 +80,35 @@ class NumpyBatch(BasicTransform):
 
     def __call__(self, force_apply=False, **kwargs):
 
-        img = kwargs["image"]
-        mask = kwargs["mask"]
+        keys = ["image"]
+        if "mask" in kwargs:
+            keys.append("mask")
 
-        batch_img = []
-        batch_mask = []
+        def compute(transform, tdata: Dict[str, np.ndarray]):
 
-        t1 = time.time()
+            data_i = transform(**tdata)
+            # print(data_i)
 
-        def compute(transform, img_i, mask_i):
-
-            data_i = transform(image=img_i, mask=mask_i)
-
-            if data_i["image"].sum() is None or data_i["mask"].sum() is None:
+            if data_i["image"].sum() is None:
                 print("None in transform!!! Transform cancelled.")
-                data_i = {"image": img_i, "mask": mask_i}
+                data_i = tdata
 
             return data_i
 
-        processed_list = Parallel(n_jobs=16)(delayed(compute)(self.transform, img[i], mask[i]) for i in range(img.shape[0]))
+        processed_list = Parallel(n_jobs=16)(delayed(compute)(
+            self.transform, {k: kwargs[k][i] for k in keys}) for i in range(kwargs["image"].shape[0])
+        )
 
-        # print(time.time() - t1)
+        batch = {key: [] for key in keys}
 
         for data in processed_list:
-            batch_img.append(data["image"][np.newaxis, ...])
-            data["mask"][data["mask"] < 0] = 0
-            batch_mask.append(data["mask"][np.newaxis, ...] / (data["mask"].sum() + 1e-8))
+            for key in keys:
+                if key == "mask":
+                    data["mask"][data["mask"] < 0] = 0
+                    data["mask"] = data["mask"] / (data["mask"].sum() + 1e-8)
+                batch[key].append(data[key][np.newaxis, ...])
 
-        return {
-            "image": np.concatenate(batch_img, axis=0),
-            "mask": np.concatenate(batch_mask, axis=0)
-                }
+        return {key: np.concatenate(batch[key], axis=0) for key in keys}
 
 
 class MaskToMeasure(DualTransform):

@@ -7,7 +7,8 @@ from torch import nn, Tensor
 
 from model import StyledConv, ToRGB
 from models.unet.la_divina_progressiya import Progressive,  ProgressiveWithStateInit, \
-    ProgressiveSequential, InjectLast, InjectByName
+    ProgressiveSequential, InjectLast, InjectByName, InputFilterHorisontal, InputFilterVertical, \
+    InputFilterAll, InputFilterName
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
@@ -66,7 +67,7 @@ class TestSimpleProgression(unittest.TestCase):
 
         state = state_init
 
-        res_output_first = []
+        res_output_first = [state]
         for i in range(3):
             state = ml[i](input[i], state)
             res_output_first.append(state)
@@ -83,7 +84,7 @@ class TestSimpleProgression(unittest.TestCase):
 
     def test_dict(self):
         state = dict_state_init['state']
-        res_output_first = []
+        res_output_first = [state]
         for i in range(3):
             state = dict_ml[i](t1_input[i], state, t2_input[i])
             res_output_first.append(state)
@@ -155,7 +156,7 @@ class TestSimpleProgression(unittest.TestCase):
             noise.append(torch.randn(8, 1, 8 * (2 ** i), 8 * (2 ** i)).cuda())
             noise.append(torch.randn(8, 1, 8 * (2 ** i), 8 * (2 ** i)).cuda())
 
-        main_out = []
+        main_out = [init_state]
         out = conv1(out, latent[:, 0], noise=noise[0])
         skip = to_rgb1(out, latent[:, 1])
         skip1 = skip
@@ -175,7 +176,7 @@ class TestSimpleProgression(unittest.TestCase):
 
         dict_ml = [conv1] + convs
         # input_dict = [{'noise': noise[i], 'style': latent[:,i,:]} for i in range(len(convs)+1)]
-        style_list = [latent[:, i] for i in range(len(convs)+1)]
+        style_list = [latent[:, i] for i in range(len(convs)+2)]
 
         pr = Progressive[List[Tensor]](dict_ml, InjectByName("input"))
         progessive_out = pr.forward(init_state, noise=noise, style=style_list)
@@ -188,14 +189,15 @@ class TestSimpleProgression(unittest.TestCase):
         )
 
         style_list_1 = [latent[:, i, :] for i in range(1, len(convs) + 2, 2)]
-        input_list_1 = [progessive_out[i-1] for i in range(1, len(convs) + 2, 2)]
+        input_list_1 = [progessive_out[i] for i in range(1, len(convs) + 2, 2)]
         progessive_skip_1 = pr2_with_init.forward(input=input_list_1, style=style_list_1)
 
         self.assertAlmostEqual((skip - progessive_skip_1[-1]).abs().max().item(), 0, delta=1e-5)
 
-        # seq = ProgressiveSequential(
-        #     (pr, "input", {'noise', 'style'}, list(range(len(input_dict)))),
-        #     (pr2_with_init, "res", {'input', 'style'}, list(range(1, len(convs) + 2, 2)))
-        # )
-        #
-        # seq.forward(input_dict, state)
+        seq = ProgressiveSequential(
+            (pr, "input", InputFilterAll(), InputFilterAll()),
+            (pr2_with_init, "res", InputFilterName({'input', 'style'}), InputFilterVertical(list(range(1, len(convs) + 2, 2))))
+        )
+
+        res = seq.forward([init_state, None], noise=noise, style=style_list)
+        self.assertAlmostEqual((skip - res[-1]).abs().max().item(), 0, delta=1e-5)
