@@ -135,15 +135,14 @@ def imgs_with_mask(imgs, mask, color=[1.0,1.0,1.0]):
     return res
 
 
-def train(generator, discriminator, encoder, device, starting_model_number):
+def train(generator, discriminator, encoder, style_encoder, device, starting_model_number):
 
-    batch = 12
+    batch = 24
     CelebaWithKeyPoints.batch_size = batch
 
     latent_size = 512
     model = CondStyleGanModel(generator, StyleGANLoss(discriminator), (0.001, 0.0015))
 
-    style_encoder = StyleEncoder(style_dim=latent_size).cuda()
     style_opt = optim.Adam(style_encoder.parameters(), lr=5e-4, betas=(0.5, 0.97))
 
     g_transforms: albumentations.DualTransform = albumentations.Compose([
@@ -183,21 +182,21 @@ def train(generator, discriminator, encoder, device, starting_model_number):
         # print("gen train", time.time() - t1)
 
         if i % 5 == 0 and i > 0:
-            noise = mixing_noise(batch//2, latent_size, 0.9, device)
+            noise = mixing_noise(batch, latent_size, 0.9, device)
 
             img_content = encoder(real_img).detach()
-            fake, fake_latent = generator(img_content[:batch//2], noise, return_latents=True)
+            fake, fake_latent = generator(img_content, noise, return_latents=True)
 
             fake_latent_test = fake_latent[:, [0, 13], :].detach()
             fake_latent_pred = style_encoder(fake)
             fake_content_pred = encoder(fake)
 
-            restored = generator.decode(img_content, style_encoder(real_img))
+            restored = generator.module.decode(img_content[:batch//2], style_encoder(real_img[:batch//2]))
             (
-                HMLoss("BCE content gan", 10000)(fake_content_pred, img_content[:batch//2]) +
-                L1("L1 restored")(restored, real_img) * 25 +
+                HMLoss("BCE content gan", 10000)(fake_content_pred, img_content) +
+                L1("L1 restored")(restored, real_img[:batch//2]) * 50 +
                 L1("L1 style gan")(fake_latent_pred, fake_latent_test) * 25 +
-                R_s(fake.detach(), fake_latent_pred) * 150
+                R_s(fake.detach(), fake_latent_pred) * 50
             ).minimize_step(
                 model.optimizer.opt_min,
                 style_opt
@@ -218,7 +217,7 @@ def train(generator, discriminator, encoder, device, starting_model_number):
                 iwm = imgs_with_mask(test_img, test_mes.toImage(256))
                 send_images_to_tensorboard(writer, iwm, "REAL", i)
 
-                restored = generator.decode(test_cond, style_encoder(test_img))
+                restored = generator.module.decode(test_cond, style_encoder(test_img))
                 send_images_to_tensorboard(writer, restored, "RESTORED", i)
 
         if i % 10000 == 0 and i > 0:
@@ -255,14 +254,22 @@ if __name__ == '__main__':
         size, channel_multiplier=1
     )
 
-    starting_model_number = 0
-    # weights = torch.load(f"/home/ibespalov/pomoika/stylegan2_w300_{str(starting_model_number).zfill(6)}.pt", map_location="cpu")
-    # generator.load_state_dict(weights['g'])
-    # discriminator.load_state_dict(weights['d'])
+    starting_model_number = 80000
 
     generator = generator.cuda()
     discriminator = discriminator.to(device)
 
-    train(generator, discriminator, encoder_HG, device, starting_model_number)
+    generator = nn.DataParallel(generator, [0, 1, 2])
+    discriminator = nn.DataParallel(discriminator, [0, 1, 2])
+    encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 2])
+
+    style_encoder = StyleEncoder(style_dim=latent).cuda()
+
+    weights = torch.load(f"/home/ibespalov/pomoika/stylegan2_w300_{str(starting_model_number).zfill(6)}.pt", map_location="cpu")
+    generator.load_state_dict(weights['g'])
+    discriminator.load_state_dict(weights['d'])
+    style_encoder.load_state_dict(weights['style'])
+
+    train(generator, discriminator, encoder_HG, style_encoder, device, starting_model_number)
 
 
