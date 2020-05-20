@@ -30,7 +30,7 @@ from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 
 from dataset.cardio_dataset import ImageMeasureDataset
 from dataset.d300w import ThreeHundredW
-from dataset.lazy_loader import LazyLoader, W300DatasetLoader, CelebaWithKeyPoints
+from dataset.lazy_loader import LazyLoader, W300DatasetLoader, CelebaWithKeyPoints, Celeba
 from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure
 from gan.gan_model import cont_style_munit_enc, CondGen3, CondDisc3, CondStyleGanModel
 from metrics.writers import ItersCounter
@@ -151,7 +151,7 @@ R_s = UnoTransformRegularizer.__call__(
 
 W300DatasetLoader.batch_size = 24
 W300DatasetLoader.test_batch_size = 32
-CelebaWithKeyPoints.batch_size = 24
+Celeba.batch_size = 24
 
 heatmaper = ToHeatMap(64)
 
@@ -170,7 +170,7 @@ for epoch in range(200):
         )
 
         lossyash.minimize_step(enc_opt)
-        real_img = next(LazyLoader.celeba_with_kps().loader)[0].to(device)
+        real_img = next(LazyLoader.celeba().loader).to(device)
         content_celeba = encoder_HG(real_img)
         content_celeba_detachted = content_celeba.detach()
 

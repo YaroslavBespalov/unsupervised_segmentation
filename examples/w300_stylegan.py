@@ -15,7 +15,7 @@ from modules.hg import HG_softmax2020
 from dataset.d300w import ThreeHundredW
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 from loss.tuner import CoefTuner, GoldTuner
-from dataset.lazy_loader import LazyLoader, CelebaWithKeyPoints
+from dataset.lazy_loader import LazyLoader, CelebaWithKeyPoints, Celeba
 from gan.loss.gan_loss import StyleGANLoss
 from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
@@ -39,11 +39,10 @@ import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms, utils
 from torchvision.datasets import ImageFolder
-from tqdm import tqdm
 
 from dataset.cardio_dataset import ImageMeasureDataset
 from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric
-from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, CondGen2, cond_ganmodel_munit, \
+from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, \
     CondGen3, CondDisc3, requires_grad
 from gan.loss_base import Loss
 from metrics.writers import ItersCounter, send_images_to_tensorboard
@@ -57,7 +56,7 @@ from stylegan2.model import Generator, Discriminator, EqualLinear, EqualConv2d
 
 
 counter = ItersCounter()
-writer = SummaryWriter(f"/home/ibespalov/pomoika/stylegan{int(time.time())}")
+writer = SummaryWriter(f"/trinity/home/n.buzun/runs/stylegan{int(time.time())}")
 l1_loss = nn.L1Loss()
 
 def make_noise(batch, latent_dim, n_noise, device):
@@ -102,7 +101,7 @@ def HMLoss(name: Optional[str], weight: float) -> Callable[[Tensor, Tensor], Los
 
         lossyash = Loss(
             nn.BCELoss()(content, target_hm) * weight +
-            nn.MSELoss()(content_xy, target_xy) * weight * 0.0005
+            nn.MSELoss()(content_xy, target_xy) * weight * 0.001
         )
 
         if name:
@@ -137,8 +136,8 @@ def imgs_with_mask(imgs, mask, color=[1.0,1.0,1.0]):
 
 def train(generator, discriminator, encoder, style_encoder, device, starting_model_number):
 
-    batch = 24
-    CelebaWithKeyPoints.batch_size = batch
+    batch = 32
+    Celeba.batch_size = batch
 
     latent_size = 512
     model = CondStyleGanModel(generator, StyleGANLoss(discriminator), (0.001, 0.0015))
@@ -158,7 +157,8 @@ def train(generator, discriminator, encoder, style_encoder, device, starting_mod
     )
 
     sample_z = torch.randn(batch, latent_size, device=device)
-    test_img = next(LazyLoader.celeba_with_kps().loader)[0].to(device)
+    test_img = next(LazyLoader.celeba().loader).to(device)
+    print(test_img.shape)
     test_cond = encoder(test_img)
 
     requires_grad(encoder, False)  # REMOVE BEFORE TRAINING
@@ -167,7 +167,7 @@ def train(generator, discriminator, encoder, style_encoder, device, starting_mod
 
     for i in range(100000):
         counter.update(i)
-        real_img = next(LazyLoader.celeba_with_kps().loader)[0].to(device)
+        real_img = next(LazyLoader.celeba().loader).to(device)
 
         img_content = encoder(real_img).detach()
 
@@ -193,9 +193,9 @@ def train(generator, discriminator, encoder, style_encoder, device, starting_mod
 
             restored = generator.module.decode(img_content[:batch//2], style_encoder(real_img[:batch//2]))
             (
-                HMLoss("BCE content gan", 10000)(fake_content_pred, img_content) +
+                HMLoss("BCE content gan", 5000)(fake_content_pred, img_content) +
                 L1("L1 restored")(restored, real_img[:batch//2]) * 50 +
-                L1("L1 style gan")(fake_latent_pred, fake_latent_test) * 25 +
+                L1("L1 style gan")(fake_latent_pred, fake_latent_test) * 30 +
                 R_s(fake.detach(), fake_latent_pred) * 50
             ).minimize_step(
                 model.optimizer.opt_min,
@@ -228,7 +228,7 @@ def train(generator, discriminator, encoder, style_encoder, device, starting_mod
                     'style': style_encoder.state_dict()
                     # 'enc': cont_style_encoder.state_dict(),
                 },
-                f'/home/ibespalov/pomoika/stylegan2_w300_{str(starting_model_number + i).zfill(6)}.pt',
+                f'/trinity/home/n.buzun/PycharmProjects/saved/stylegan2_w300_{str(starting_model_number + i).zfill(6)}.pt',
             )
 
 
@@ -239,8 +239,10 @@ if __name__ == '__main__':
     torch.cuda.set_device(device)
 
     encoder_HG = HG_softmax2020(num_classes=68, heatmap_size=64)
-    encoder_HG.load_state_dict(torch.load("/home/ibespalov/pomoika/hg2_e29.pt", map_location="cpu"))
+    encoder_HG.load_state_dict(torch.load("/trinity/home/n.buzun/PycharmProjects/saved/hg2_e29.pt", map_location="cpu"))
     encoder_HG = encoder_HG.cuda()
+
+    print("HG")
 
     latent = 512
     n_mlp = 5
@@ -254,21 +256,23 @@ if __name__ == '__main__':
         size, channel_multiplier=1
     )
 
-    starting_model_number = 80000
+    starting_model_number = 110000
 
     generator = generator.cuda()
     discriminator = discriminator.to(device)
 
-    generator = nn.DataParallel(generator, [0, 1, 2])
-    discriminator = nn.DataParallel(discriminator, [0, 1, 2])
-    encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 2])
+    generator = nn.DataParallel(generator, [0, 1, 2, 3])
+    discriminator = nn.DataParallel(discriminator, [0, 1, 2, 3])
+    encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 2, 3])
 
     style_encoder = StyleEncoder(style_dim=latent).cuda()
 
-    weights = torch.load(f"/home/ibespalov/pomoika/stylegan2_w300_{str(starting_model_number).zfill(6)}.pt", map_location="cpu")
+    weights = torch.load(f"/trinity/home/n.buzun/PycharmProjects/saved/stylegan2_w300_{str(starting_model_number).zfill(6)}.pt", map_location="cpu")
     generator.load_state_dict(weights['g'])
     discriminator.load_state_dict(weights['d'])
     style_encoder.load_state_dict(weights['style'])
+
+    print("stylegan")
 
     train(generator, discriminator, encoder_HG, style_encoder, device, starting_model_number)
 

@@ -70,6 +70,34 @@ class MRIImages(Dataset):
         return len(self.init)
 
 
+class ImageDataset(Dataset):
+    def __init__(self,
+                 images_path,
+                 img_transform):
+
+        image_folders = [x for x in os.listdir(images_path)]
+
+        self.imgs = []
+
+        for folder in image_folders:
+            for img in os.listdir(os.path.join(images_path, folder)):
+                img_path = os.path.join(images_path, folder, img)
+                self.imgs += [img_path]
+
+        self.img_transform = img_transform
+
+    def __getitem__(self, index):
+        image = np.array(Image.open(self.imgs[index]).convert('RGB'))
+
+        dict_transfors = self.img_transform(image=image)
+        image = dict_transfors['image']
+
+        return image
+
+    def __len__(self):
+        return len(self.imgs)
+
+
 class ImageMeasureDataset(Dataset):
     def __init__(self,
                  images_path,

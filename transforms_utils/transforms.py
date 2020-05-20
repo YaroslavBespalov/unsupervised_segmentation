@@ -1,12 +1,13 @@
 import time
 from typing import Dict
 
+import albumentations
 import torch
 import numpy as np
 from albumentations import DualTransform, BasicTransform
 from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric
 from scipy.ndimage import label, generate_binary_structure
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, cpu_count
 
 
 class MeasureToMask(DualTransform):
@@ -43,6 +44,17 @@ class KeyPointsToMeasure(DualTransform):
     def apply_to_keypoint(self, kp, **params):
         x, y, a, s = kp
         return ProbabilityMeasure(params["prob"], torch.cat([y[..., None], x[..., None]], dim=-1))
+
+
+class ResizeMask(albumentations.Resize):
+    def __init__(self, h: int, w: int):
+        super(ResizeMask, self).__init__(h, w)
+
+    def apply(self, img: torch.Tensor, **params):
+        return img
+
+    def apply_to_mask(self, mask: torch.Tensor, **params):
+        return super().apply_to_mask(mask, **params)
 
 
 class ToNumpy(DualTransform):
@@ -95,7 +107,7 @@ class NumpyBatch(BasicTransform):
 
             return data_i
 
-        processed_list = Parallel(n_jobs=16)(delayed(compute)(
+        processed_list = Parallel(n_jobs=cpu_count())(delayed(compute)(
             self.transform, {k: kwargs[k][i] for k in keys}) for i in range(kwargs["image"].shape[0])
         )
 
