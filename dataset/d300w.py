@@ -2,7 +2,6 @@ import albumentations
 import torch
 from torch import nn, Tensor
 import numpy as np
-import pandas as pd
 import os
 from PIL import Image
 import glob

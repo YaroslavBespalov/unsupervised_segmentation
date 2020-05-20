@@ -5,9 +5,11 @@ import torch
 from torch import nn, Tensor
 from torch.utils import data
 
-from dataset.cardio_dataset import ImageMeasureDataset
+from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset
 from dataset.d300w import ThreeHundredW
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
+
+from parameters.path import Paths
 
 
 def data_sampler(dataset, shuffle, distributed):
@@ -32,7 +34,7 @@ class W300DatasetLoader:
     test_batch_size = 32
 
     def __init__(self):
-        dataset_train = ThreeHundredW("/raid/data/300w", train=True, imwidth=500, crop=15)
+        dataset_train = ThreeHundredW(f"{Paths.default.data()}/300w", train=True, imwidth=500, crop=15)
 
         self.loader_train = data.DataLoader(
             dataset_train,
@@ -44,12 +46,12 @@ class W300DatasetLoader:
 
         self.loader_train_inf = sample_data(self.loader_train)
 
-        self.test_dataset = ThreeHundredW("/raid/data/300w", train=False, imwidth=500, crop=15)
+        self.test_dataset = ThreeHundredW(f"{Paths.default.data()}/300w", train=False, imwidth=500, crop=15)
 
         self.test_loader = data.DataLoader(
             self.test_dataset,
             batch_size=W300DatasetLoader.test_batch_size,
-            drop_last=True,
+            drop_last=False,
             num_workers=20
         )
 
@@ -77,11 +79,15 @@ class CelebaWithKeyPoints:
 
     def __init__(self):
 
+        print("init calaba with masks")
+
         dataset = ImageMeasureDataset(
-            "/raid/data/celeba",
-            "/raid/data/celeba_masks",
+            "/gpfs/gpfs0/n.buzun/celeba",
+            "/gpfs/gpfs0/n.buzun/celeba_masks",
             img_transform=CelebaWithKeyPoints.transform()
         )
+
+        print("dataset size: ", len(dataset))
 
         self.loader = data.DataLoader(
             dataset,
@@ -91,6 +97,48 @@ class CelebaWithKeyPoints:
             num_workers=20
         )
 
+        print("batch size: ", CelebaWithKeyPoints.batch_size)
+
+        self.loader = sample_data(self.loader)
+
+
+class Celeba:
+
+    image_size = 256
+    batch_size = 8
+
+    @staticmethod
+    def transform():
+        return albumentations.Compose([
+            albumentations.HorizontalFlip(),
+            albumentations.Resize(CelebaWithKeyPoints.image_size, CelebaWithKeyPoints.image_size),
+            # albumentations.ElasticTransform(p=0.5, alpha=50, alpha_affine=1, sigma=10),
+            albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10),
+            albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            AlbToTensor()
+        ])
+
+    def __init__(self):
+
+        print("init calaba")
+
+        dataset = ImageDataset(
+            "/gpfs/gpfs0/n.buzun/celeba",
+            img_transform=Celeba.transform()
+        )
+
+        print("dataset size: ", len(dataset))
+
+        self.loader = data.DataLoader(
+            dataset,
+            batch_size=Celeba.batch_size,
+            sampler=data_sampler(dataset, shuffle=True, distributed=False),
+            drop_last=True,
+            num_workers=Celeba.batch_size
+        )
+
+        print("batch size: ", Celeba.batch_size)
+
         self.loader = sample_data(self.loader)
 
 
@@ -98,6 +146,7 @@ class LazyLoader:
 
     w300_save: Optional[W300DatasetLoader] = None
     celeba_kp_save: Optional[CelebaWithKeyPoints] = None
+    celeba_save: Optional[Celeba] = None
 
     @staticmethod
     def w300() -> W300DatasetLoader:
@@ -110,3 +159,9 @@ class LazyLoader:
         if not LazyLoader.celeba_kp_save:
             LazyLoader.celeba_kp_save = CelebaWithKeyPoints()
         return LazyLoader.celeba_kp_save
+
+    @staticmethod
+    def celeba():
+        if not LazyLoader.celeba_save:
+            LazyLoader.celeba_save = Celeba()
+        return LazyLoader.celeba_save
