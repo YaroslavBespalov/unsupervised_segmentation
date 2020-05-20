@@ -49,7 +49,7 @@ class W300DatasetLoader:
         self.test_loader = data.DataLoader(
             self.test_dataset,
             batch_size=W300DatasetLoader.test_batch_size,
-            drop_last=True,
+            drop_last=False,
             num_workers=20
         )
 
