@@ -35,7 +35,7 @@ from gan.loss_base import Loss
 from transforms_utils.transforms import MeasureToMask, ToNumpy, ToTensor, MaskToMeasure, NumpyBatch, MeasureToKeyPoints
 
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 print(device)
 torch.cuda.set_device(device)
 
@@ -125,7 +125,7 @@ generator = generator.to(device)
 
 discriminator = nn.DataParallel(discriminator, [0, 1, 2])
 generator = nn.DataParallel(generator, [0, 1, 2])
-encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 2])
+# encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 2])
 
 model = CondStyleGanModel(generator, StyleGANLoss(discriminator), (0.0006, 0.001))
 loss_without_penalty = StyleGANLossWithoutPenalty(discriminator)
@@ -153,7 +153,7 @@ Celeba.batch_size = 24
 
 heatmaper = ToHeatMap(64)
 
-tuner = GoldTuner([1.0, 1.0], device=device, rule_eps=0.02, radius=0.5, active=True)
+# tuner = GoldTuner([1.0, 1.0], device=device, rule_eps=0.02, radius=0.5, active=True)
 
 w300_test = next(iter(LazyLoader.w300().test_loader))
 w300_test_image = w300_test['data'].to(device)[:8]
@@ -170,40 +170,25 @@ for i in range(100000):
     w300_target_hm = heatmaper.forward(w300_mes.probability, w300_mes.coord * 63).detach()
 
     content300 = encoder_HG(w300_image)
-    if torch.isnan(content300).any():
-        print("300 content is nan")
-        continue
 
     loss_or_none = writable("real_content loss", hm_svoego_roda_loss)(content300, w300_target_hm)
 
     loss_or_none.minimize_step(enc_opt)
 
-    real_img = next(LazyLoader.celeba().loader).to(device)
-
-    if torch.isnan(real_img).any():
-        print("real img is nan")
-        continue
-
-    content_celeba = encoder_HG(real_img)
-    content_celeba_detachted = content_celeba.detach()
-
-    if torch.isnan(content_celeba).any():
-        print("content celebs is nan")
-        continue
-
-    noise = mixing_noise(W300DatasetLoader.batch_size, latent_size, 0.9, device)
-    fake, _ = generator(content_celeba_detachted, noise)
-
-    fake_content = encoder_HG(fake)
-
-    if torch.isnan(fake_content).any():
-        print("fake content is nan")
-        continue
-
-    tuner.sum_losses([
-        model.loss.generator_loss(real=None, fake=[real_img, content_celeba]) * 0.1 +
-        writable("fake_content loss", hm_svoego_roda_loss)(fake_content, content_celeba_detachted)
-    ]).minimize_step(enc_opt)
+    # real_img = next(LazyLoader.celeba().loader).to(device)
+    #
+    # content_celeba = encoder_HG(real_img)
+    # content_celeba_detachted = content_celeba.detach()
+    #
+    # noise = mixing_noise(W300DatasetLoader.batch_size, latent_size, 0.9, device)
+    # fake, _ = generator(content_celeba_detachted, noise)
+    #
+    # fake_content = encoder_HG(fake)
+    #
+    # tuner.sum_losses([
+    #     model.loss.generator_loss(real=None, fake=[real_img, content_celeba]) * 0.1,
+    #     writable("fake_content loss", hm_svoego_roda_loss)(fake_content, content_celeba_detachted)
+    # ]).minimize_step(enc_opt)
 
 
     #     loss_without_penalty._discriminator_loss(discriminator(real_img, content_celeba), discriminator(fake.detach(), content_celeba)) * (-5)
@@ -245,7 +230,7 @@ for i in range(100000):
         with torch.no_grad():
             test_loss = test(encoder_HG)
             print(test_loss)
-            tuner.update(test_loss)
+            # tuner.update(test_loss)
             coord, p = heatmap_to_measure(encoder_HG(w300_test_image))
             pred_measure = ProbabilityMeasure(p, coord)
             iwm = imgs_with_mask(w300_test_image, pred_measure.toImage(256))

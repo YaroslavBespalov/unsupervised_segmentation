@@ -46,15 +46,16 @@ class KeyPointsToMeasure(DualTransform):
         return ProbabilityMeasure(params["prob"], torch.cat([y[..., None], x[..., None]], dim=-1))
 
 
-class ResizeMask(albumentations.Resize):
+class ResizeMask(DualTransform):
     def __init__(self, h: int, w: int):
-        super(ResizeMask, self).__init__(h, w)
+        super(ResizeMask, self).__init__(1)
+        self.resize = albumentations.Resize(h, w)
 
-    def apply(self, img: torch.Tensor, **params):
+    def apply(self, img: np.ndarray, **params):
         return img
 
     def apply_to_mask(self, mask: torch.Tensor, **params):
-        return super().apply_to_mask(mask, **params)
+        return self.resize.apply_to_mask(mask)
 
 
 class ToNumpy(DualTransform):
@@ -82,6 +83,21 @@ class ToTensor(DualTransform):
 
     def apply_to_mask(self, img: np.array, **params):
         return torch.tensor(np.transpose(img, [0, 3, 1, 2]), device=self.device)
+
+
+class NormalizeMask(albumentations.DualTransform):
+    def __init__(self, dim):
+        super(NormalizeMask, self).__init__(1)
+        self.dim = dim
+
+    def apply(self, img: torch.Tensor, **params):
+        return img
+
+    def apply_to_mask(self, img: torch.Tensor, **params):
+        img = np.array(img)
+        img[img<0]=0
+        img = img / (img.sum(axis=self.dim, keepdims=True) + 1e-10)
+        return img
 
 
 class NumpyBatch(BasicTransform):
@@ -115,9 +131,10 @@ class NumpyBatch(BasicTransform):
 
         for data in processed_list:
             for key in keys:
-                if key == "mask":
-                    data["mask"][data["mask"] < 0] = 0
-                    data["mask"] = data["mask"] / (data["mask"].sum() + 1e-8)
+                # if key == "mask":
+                    # data["mask"] = np.array(data["mask"])
+                    # data["mask"][data["mask"] < 0] = 0
+                    # data["mask"] = data["mask"] / (data["mask"].sum() + 1e-8)
                 batch[key].append(data[key][np.newaxis, ...])
 
         return {key: np.concatenate(batch[key], axis=0) for key in keys}

@@ -7,7 +7,8 @@ import albumentations
 
 from loss.losses import Samples_Loss
 from parameters.path import Paths
-from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure, ResizeMask
+from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure, ResizeMask, \
+    NormalizeMask
 
 sys.path.append(os.path.join(sys.path[0], '../'))
 sys.path.append(os.path.join(sys.path[0], '../dataset'))
@@ -24,7 +25,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from dataset.lazy_loader import LazyLoader, W300DatasetLoader
 from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure
-from metrics.writers import ItersCounter
+from metrics.writers import ItersCounter, send_images_to_tensorboard
 from modules.hg import HG_softmax2020
 from gan.loss_base import Loss
 from matplotlib import pyplot as plt
@@ -45,6 +46,15 @@ def writable(name: str, f: Callable[[Any], Loss]):
         writer.add_scalar(name, loss.item(), counter.get_iter(name))
         return loss
     return decorated
+
+def imgs_with_mask(imgs, mask, color=[1.0,1.0,1.0]):
+    # mask = torch.cat([mask, mask, mask], dim=1)
+    mask = mask[:, 0, :, :]
+    res: Tensor = imgs.cpu().detach()
+    res = res.permute(0, 2, 3, 1)
+    res[mask > 0.00001, :] = torch.tensor(color, dtype=torch.float32)
+    res = res.permute(0, 3, 1, 2)
+    return res
 
 def otdelnaya_function(content: Tensor, measure: ProbabilityMeasure):
     content_cropped = content
@@ -74,24 +84,24 @@ encoder_HG = nn.DataParallel(encoder_HG, [0, 1])
 
 cont_opt = optim.Adam(encoder_HG.parameters(), lr=1e-5, betas=(0.5, 0.97))
 
-W300DatasetLoader.batch_size = 24
-W300DatasetLoader.test_batch_size = 64
+W300DatasetLoader.batch_size = 8
+W300DatasetLoader.test_batch_size = 8
 
 heatmaper = ToHeatMap(64)
 
-g_transforms: albumentations.DualTransform = albumentations.Compose([
-    ToNumpy(),
-    NumpyBatch(albumentations.Compose([
-           ResizeMask(256, 256),
-           # albumentations.ElasticTransform(p=1, alpha=100, alpha_affine=1, sigma=10),
-
-    ])),
-    NumpyBatch(albumentations.Compose([
-        albumentations.ShiftScaleRotate(p=1, rotate_limit=10),
-        ResizeMask(64, 64)
-    ])),
-    ToTensor(device)
-])
+# g_transforms: albumentations.DualTransform = albumentations.Compose([
+#     ToNumpy(),
+#     NumpyBatch(albumentations.Compose([
+#            ResizeMask(256, 256),
+#            # albumentations.ElasticTransform(p=1, alpha=100, alpha_affine=1, sigma=10),
+#
+#     ])),
+#     NumpyBatch(albumentations.Compose([
+#         albumentations.ShiftScaleRotate(p=1, rotate_limit=10),
+#         ResizeMask(64, 64)
+#     ])),
+#     ToTensor(device)
+# ])
 
 W1 = Samples_Loss(scaling=0.85, p=1)
 
@@ -100,6 +110,16 @@ W1 = Samples_Loss(scaling=0.85, p=1)
 #     W1(content_to_measure(cont_style_encoder.get_content(trans_dict['image'])), trans_dict['mask'])  # +
 #     # W2(content_to_measure(cont_style_encoder.get_content(trans_dict['image'])), trans_dict['mask'])
 # )
+
+g_transforms: albumentations.DualTransform = albumentations.Compose([
+        ToNumpy(),
+        NumpyBatch(ResizeMask(h=256, w=256)),
+        NumpyBatch(albumentations.ElasticTransform(p=1, alpha=150, alpha_affine=1, sigma=10)),
+        NumpyBatch(albumentations.ShiftScaleRotate(p=1, rotate_limit=10)),
+        NumpyBatch(ResizeMask(h=64, w=64)),
+        NumpyBatch(NormalizeMask(dim=(0,1,2))),
+        ToTensor(device),
+    ])
 
 
 for epoch in range(30):
@@ -111,12 +131,14 @@ for epoch in range(30):
         mes = ProbabilityMeasureFabric(256).from_coord_tensor(batch["meta"]["keypts_normalized"]).cuda()
         target_hm = heatmaper.forward(mes.probability, mes.coord * 63)
 
-        content = encoder_HG(data)
-        content_xy, _ = heatmap_to_measure(content)
 
-        trans_dict = g_transforms(image=data, mask=target_hm * 68)
-        trans_image = trans_dict["image"]
-        trans_content = trans_dict["mask"]
+        content = encoder_HG(data)
+        content_xy, prob = heatmap_to_measure(target_hm)
+
+        transformed_res = g_transforms(image=data, mask=target_hm)
+        trans_image = transformed_res["image"]
+        trans_content = transformed_res["mask"]
+        content_xy, prob = heatmap_to_measure(trans_content)
 
         lossyash = Loss(
             nn.BCELoss()(content, target_hm) +
@@ -130,10 +152,13 @@ for epoch in range(30):
             print(i)
             with torch.no_grad():
                 trans = albumentations.Resize(256, 256)
-                plt.imshow(trans(image=trans_content[0].sum(0).cpu().detach().numpy())["image"] * 100 + trans_image[0][0].cpu().detach().numpy())
-                plt.show()
-                test_loss = test(encoder_HG)
-                writer.add_scalar("test_loss", test_loss, i + epoch*len(LazyLoader.w300().loader_train))
+                # plt.imshow(trans(image=trans_content[0].sum(0).cpu().detach().numpy())["image"] * 100 + trans_image[0][0].cpu().detach().numpy())
+                mask = ProbabilityMeasure(prob, content_xy).toImage(256)
+                transformed_res = imgs_with_mask(trans_image, mask)
+                send_images_to_tensorboard(writer, transformed_res, "W300_test_image", i + epoch*len(LazyLoader.w300().loader_train))
+                # plt.show()
+                # test_loss = test(encoder_HG)
+                # writer.add_scalar("test_loss", test_loss, i + epoch*len(LazyLoader.w300().loader_train))
 
     # torch.save(enc.state_dict(), f"/home/ibespalov/pomoika/hg2_e{epoch}.pt")
 
