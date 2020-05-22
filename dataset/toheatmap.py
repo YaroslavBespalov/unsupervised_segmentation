@@ -52,7 +52,7 @@ def heatmap_to_measure(hm: Tensor):
         y = torch.arange(D, device=hm.device).view(1, 1, -1)
         px = hm.sum(dim=3)
         py = hm.sum(dim=2)
-        p = hm.sum(dim=[2, 3])
+        p = hm.sum(dim=[2, 3]) + 1e-7
         coords_x = ((px * x).sum(dim=2) / p)[..., None]
         coords_y = ((py * y).sum(dim=2) / p)[..., None]
         coords = torch.cat([coords_y, coords_x], dim=-1) / (D - 1)

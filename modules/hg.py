@@ -304,7 +304,8 @@ class HG_softmax2020(nn.Module):
     def forward(self, image: Tensor):
         B, C, D, D = image.shape
         heatmaps: List[Tensor] = self.model.forward(image)
-        return heatmaps[-1].view(B, self.num_classes, -1)\
+
+        return heatmaps[-1].clamp(-100, 30).view(B, self.num_classes, -1)\
                    .softmax(dim=2)\
                    .view(B, self.num_classes, self.heatmap_size, self.heatmap_size) / self.num_classes
 
