@@ -31,7 +31,7 @@ class LinearTransformOT:
 
     @staticmethod
     def forward(pred: ProbabilityMeasure, targets: ProbabilityMeasure, iters: int = 200):
-        lambd = 0.001
+        lambd = 0.002
 
         with torch.no_grad():
             P = SOT(iters, lambd).forward(pred.centered(), targets.centered())

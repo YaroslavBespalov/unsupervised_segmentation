@@ -90,7 +90,7 @@ class StyleTransformRegularizer:
 class BarycenterRegularizer:
 
     @staticmethod
-    def __call__(barycenter, ct: float = 1, ca: float = 2, cw: float = 10):
+    def __call__(barycenter, ct: float = 1, ca: float = 2, cw: float = 5):
 
         def loss(image: Tensor, mask: ProbabilityMeasure):
 
@@ -101,7 +101,7 @@ class BarycenterRegularizer:
 
             t_loss = Samples_Loss(scaling=0.8, border=0.0001)(mask, mask.detach() + T)
             a_loss = Samples_Loss(scaling=0.8, border=0.0001)(mask.centered(), mask.centered().multiply(A).detach())
-            w_loss = Samples_Loss(scaling=0.8, border=0.00001)(mask.centered().multiply(A), barycenter.centered().detach())
+            w_loss = Samples_Loss(scaling=0.85, border=0.00001)(mask.centered().multiply(A), barycenter.centered().detach())
 
             # print(time.time() - t1)
 

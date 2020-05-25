@@ -4,8 +4,9 @@ import albumentations
 import torch
 from torch import nn, Tensor
 from torch.utils import data
+from torch.utils.data import DataLoader
 
-from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset
+from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset, CelebaWithLandmarks
 from dataset.d300w import ThreeHundredW
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 
@@ -147,6 +148,7 @@ class LazyLoader:
     w300_save: Optional[W300DatasetLoader] = None
     celeba_kp_save: Optional[CelebaWithKeyPoints] = None
     celeba_save: Optional[Celeba] = None
+    celebaWithLandmarks: Optional[CelebaWithLandmarks] = None
 
     @staticmethod
     def w300() -> W300DatasetLoader:
@@ -165,3 +167,9 @@ class LazyLoader:
         if not LazyLoader.celeba_save:
             LazyLoader.celeba_save = Celeba()
         return LazyLoader.celeba_save
+
+    @staticmethod
+    def celeba_test(batch_size=1):
+        if not LazyLoader.celebaWithLandmarks:
+            LazyLoader.celebaWithLandmarks = DataLoader(CelebaWithLandmarks(), batch_size=batch_size)
+        return LazyLoader.celebaWithLandmarks

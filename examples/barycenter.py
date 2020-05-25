@@ -10,25 +10,16 @@ from albumentations.pytorch import ToTensorV2
 from torch import Tensor, nn
 from torch import optim
 from dataset.cardio_dataset import SegmentationDataset
+from dataset.lazy_loader import LazyLoader
 from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure
+from dataset.toheatmap import heatmap_to_measure
 from loss.losses import Samples_Loss
+from modules.hg import HG_softmax2020
+from parameters.path import Paths
+
 image_size = 256
-batch_size = 4
-padding = 70
-
-device = torch.device("cuda")
-
-dataset = SegmentationDataset(
-    "/raid/data/celeba",
-    "/raid/data/celeba_masks",
-    transform_joint=albumentations.Compose([
-                               albumentations.Resize(image_size, image_size),
-                               albumentations.CenterCrop(image_size, image_size),
-                               ToTensorV2()
-    ]),
-    # img_transform=None
-    img_transform=torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-)
+batch_size = 8
+padding = 68
 
 fabric = ProbabilityMeasureFabric(image_size)
 barycenter: ProbabilityMeasure = fabric.random(padding).cuda()
@@ -36,35 +27,35 @@ barycenter.requires_grad_()
 
 coord = barycenter.coord
 
-opt = optim.Adam(iter([coord]), lr=0.001)
+opt = optim.Adam(iter([coord]), lr=0.0006)
 
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=20)
+encoder_HG = HG_softmax2020(num_classes=68, heatmap_size=64)
+encoder_HG.load_state_dict(torch.load(f"{Paths.default.models()}/hg2_e29.pt", map_location="cpu"))
+encoder_HG = encoder_HG.cuda()
 
+for iter in range(3000):
 
-for iter in range(20):
+    img = next(LazyLoader.celeba().loader).cuda()
+    content = encoder_HG(img)
+    coord, p = heatmap_to_measure(content)
+    mes = ProbabilityMeasure(p, coord)
 
-    # loss_sum = Loss.ZERO()
+    barycenter_cat = fabric.cat([barycenter] * batch_size)
 
-    for i, (imgs, masks) in enumerate(dataloader, 0):
+    loss = Samples_Loss()(barycenter_cat, mes)
 
-        barycenter_cat = fabric.cat([barycenter] * batch_size)
+    opt.zero_grad()
+    loss.to_tensor().backward()
+    opt.step()
 
-        mi = fabric.from_mask(masks).cuda()
-        loss = Samples_Loss()(barycenter_cat, mi)
+    barycenter.probability.data = barycenter.probability.relu().data
+    barycenter.probability.data /= barycenter.probability.sum(dim=1, keepdim=True)
 
-        opt.zero_grad()
-        loss.to_tensor().backward()
-        opt.step()
+    if iter % 100 == 0:
+        print(iter, loss.item())
 
-        barycenter.probability.data = barycenter.probability.relu().data
-        barycenter.probability.data /= barycenter.probability.sum(dim=1, keepdim=True)
+        plt.imshow(barycenter.toImage(200)[0][0].detach().cpu().numpy())
+        plt.show()
 
-        if i % 20 == 0:
-            print(i)
-            print(iter, loss.item())
-
-            plt.imshow(barycenter.toImage(200)[0][0].detach().cpu().numpy())
-            plt.show()
-
-        if i == 3000:
-            fabric.save("face_barycenter", barycenter)
+    # if iter % 1000 == 0:
+        # fabric.save("face_barycenter_68", barycenter)

@@ -111,15 +111,32 @@ W1 = Samples_Loss(scaling=0.85, p=1)
 #     # W2(content_to_measure(cont_style_encoder.get_content(trans_dict['image'])), trans_dict['mask'])
 # )
 
+# g_transforms: albumentations.DualTransform = albumentations.Compose([
+#         ToNumpy(),
+#         NumpyBatch(ResizeMask(h=256, w=256)),
+#         NumpyBatch(albumentations.ElasticTransform(p=1, alpha=150, alpha_affine=1, sigma=10)),
+#         NumpyBatch(albumentations.ShiftScaleRotate(p=1, rotate_limit=10)),
+#         NumpyBatch(ResizeMask(h=64, w=64)),
+#         NumpyBatch(NormalizeMask(dim=(0,1,2))),
+#         ToTensor(device),
+#     ])
+
 g_transforms: albumentations.DualTransform = albumentations.Compose([
-        ToNumpy(),
-        NumpyBatch(ResizeMask(h=256, w=256)),
-        NumpyBatch(albumentations.ElasticTransform(p=1, alpha=150, alpha_affine=1, sigma=10)),
-        NumpyBatch(albumentations.ShiftScaleRotate(p=1, rotate_limit=10)),
-        NumpyBatch(ResizeMask(h=64, w=64)),
-        NumpyBatch(NormalizeMask(dim=(0,1,2))),
-        ToTensor(device),
-    ])
+    ToNumpy(),
+    NumpyBatch(albumentations.Compose([
+        ResizeMask(h=256, w=256),
+        albumentations.ElasticTransform(p=0.7, alpha=150, alpha_affine=1, sigma=10),
+        albumentations.ShiftScaleRotate(p=0.7, rotate_limit=10),
+        ResizeMask(h=64, w=64),
+        NormalizeMask(dim=(0, 1, 2))
+    ])),
+    # NumpyBatch(ResizeMask(h=256, w=256)),
+    # NumpyBatch(albumentations.ElasticTransform(p=0.8, alpha=150, alpha_affine=1, sigma=10)),
+    # NumpyBatch(albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10)),
+    # NumpyBatch(ResizeMask(h=64, w=64)),
+    # NumpyBatch(NormalizeMask(dim=(0, 1, 2))),
+    ToTensor(device),
+])
 
 
 for epoch in range(30):

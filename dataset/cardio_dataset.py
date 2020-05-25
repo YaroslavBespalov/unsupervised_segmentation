@@ -6,6 +6,10 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import numpy as np
 import re
+import albumentations
+from albumentations.pytorch.transforms import ToTensor as AlbToTensor
+
+from parameters.path import Paths
 
 
 class SegmentationDataset(Dataset):
@@ -96,6 +100,29 @@ class ImageDataset(Dataset):
 
     def __len__(self):
         return len(self.imgs)
+
+
+class CelebaWithLandmarks(Dataset):
+    def __init__(self):
+
+        self.landmarks_path = os.path.join(Paths.default.data(), "celeba_landmarks")
+        self.img_names = [img[:-4] for img in os.listdir(os.path.join(self.landmarks_path))]
+        self.img_path = os.path.join(Paths.default.data(), "celeba/img_align_celeba/")
+        self.img_transform = albumentations.Compose([
+            albumentations.Resize(256, 256),
+            albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            AlbToTensor()
+        ])
+
+    def __getitem__(self, index):
+        image = np.array(Image.open(os.path.join(self.img_path, self.img_names[index] + '.jpg')).convert('RGB'))
+        dict_transfors = self.img_transform(image=image)
+        image = dict_transfors['image']
+        landmarks = np.load(os.path.join(self.landmarks_path + '/', self.img_names[index] +'.npy'))
+        return image, torch.from_numpy(landmarks[0])
+
+    def __len__(self):
+        return len(self.img_names)
 
 
 class ImageMeasureDataset(Dataset):

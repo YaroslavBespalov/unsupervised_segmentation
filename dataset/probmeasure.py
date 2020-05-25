@@ -2,6 +2,8 @@ from typing import List
 import torch
 from torch import Tensor
 import numpy as np
+
+from dataset.toheatmap import heatmap_to_measure
 from modules.ToImage import ToImage2D
 
 
@@ -94,6 +96,17 @@ class ProbabilityMeasure:
         return ProbabilityMeasure(self.probability.detach(), self.coord.detach())
 
 
+class UniformMeasure2D01(ProbabilityMeasure):
+
+    def __init__(self, coord: Tensor):
+        B, N, D = coord.shape
+        assert D == 2
+        assert coord.max() < 1 + 1e-8
+        assert coord.min() > - 1e-8
+        prob = torch.ones(B, N, device=coord.device, dtype=torch.float32) / N
+        super().__init__(prob, coord)
+
+
 class ProbabilityMeasureFabric:
     def __init__(self, size):
         use_cuda = torch.cuda.is_available()
@@ -150,8 +163,19 @@ class ProbabilityMeasureFabric:
 
     def load(self, path: str) -> ProbabilityMeasure:
         coord = torch.from_numpy(np.load(path + "_coord.npy"))
+        # prob = torch.ones(coord.shape[0], coord.shape[1]) / coord.shape[1]
         prob = torch.from_numpy(np.load(path + "_prob.npy"))
         return ProbabilityMeasure(prob, coord)
 
 
+class UniformMeasure2DFactory:
 
+    @staticmethod
+    def from_heatmap(hm: Tensor) -> UniformMeasure2D01:
+        coord, _ = heatmap_to_measure(hm)
+        return UniformMeasure2D01(coord)
+
+    @staticmethod
+    def load(path: str) -> UniformMeasure2D01:
+        coord = torch.from_numpy(np.load(path + "_coord.npy"))
+        return UniformMeasure2D01(coord)

@@ -57,6 +57,17 @@ class ResizeMask(DualTransform):
     def apply_to_mask(self, mask: torch.Tensor, **params):
         return self.resize.apply_to_mask(mask)
 
+class ResizeImage(DualTransform):
+    def __init__(self, h: int, w: int):
+        super(ResizeImage, self).__init__(1)
+        self.resize = albumentations.Resize(h, w)
+
+    def apply(self, img: np.ndarray, **params):
+        return self.resize.apply(img)
+
+    def apply_to_mask(self, mask: torch.Tensor, **params):
+        return mask
+
 
 class ToNumpy(DualTransform):
     def __init__(self):
@@ -100,11 +111,33 @@ class NormalizeMask(albumentations.DualTransform):
         return img
 
 
+class ParTr(albumentations.DualTransform):
+
+    def __init__(self, transform: DualTransform):
+        super(ParTr, self).__init__(1)
+        self.transform = transform
+        self.par_img = Parallel(n_jobs=3)
+        self.par_mask = Parallel(n_jobs=8)
+
+    def apply(self, img: np.ndarray, **params):
+        processed_list = self.par_img(
+            delayed(self.transform.apply)(img[:, :, i:i+1]) for i in range(img.shape[-1])
+        )
+        return np.concatenate(processed_list, axis=2)
+
+    def apply_to_mask(self, img: np.ndarray, **params):
+        processed_list = self.par_mask(
+            delayed(self.transform.apply_to_mask)(img[:, :, i:i + 1]) for i in range(img.shape[-1])
+        )
+        return np.concatenate(processed_list, axis=2)
+
+
 class NumpyBatch(BasicTransform):
 
     def __init__(self, transform: BasicTransform):
         super(NumpyBatch, self).__init__(1)
         self.transform = transform
+        self.par = Parallel(n_jobs=24)
 
     def __call__(self, force_apply=False, **kwargs):
 
@@ -123,7 +156,7 @@ class NumpyBatch(BasicTransform):
 
             return data_i
 
-        processed_list = Parallel(n_jobs=cpu_count())(delayed(compute)(
+        processed_list = self.par(delayed(compute)(
             self.transform, {k: kwargs[k][i] for k in keys}) for i in range(kwargs["image"].shape[0])
         )
 

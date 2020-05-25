@@ -45,7 +45,7 @@ class DGXPath(PathProvider):
 
     @staticmethod
     def models() -> str:
-        return DGXPath.homa
+        return DGXPath.ausland + "/saved_models"
 
     @staticmethod
     def data() -> str:
