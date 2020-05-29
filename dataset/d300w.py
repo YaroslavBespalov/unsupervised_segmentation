@@ -12,7 +12,6 @@ from torchvision import transforms
 import torchvision.transforms.functional as TF
 from torch.utils.data.dataset import Dataset
 
-import matplotlib.pyplot as plt
 
 
 def center_by_face(image: torch.Tensor, landmarks: torch.Tensor):

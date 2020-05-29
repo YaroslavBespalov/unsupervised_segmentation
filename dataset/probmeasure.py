@@ -80,6 +80,10 @@ class ProbabilityMeasure:
 
     def toImage(self, size: int) -> Tensor:
         coord = self.coord * (size-1)
+
+        assert int(coord.min().floor().item()) >= 0
+        assert int(coord.max().ceil().item()) <= (size-1)
+
         return ToImage2D(size)(self.probability, coord).transpose(2, 3)
 
     def toChannels(self) -> Tensor:

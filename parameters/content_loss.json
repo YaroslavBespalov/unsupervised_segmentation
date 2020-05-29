@@ -1,0 +1,9 @@
+{
+  "Fake-content D": 0.5,
+  "Real-content D": 100.0,
+  "R_b": 15,
+  "Sparse": 200.0,
+  "R_t": 10,
+  "L1 image": 10.0,
+  "fake_content loss": 0.5
+}

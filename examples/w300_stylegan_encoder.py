@@ -12,7 +12,7 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
 from loss.tuner import GoldTuner
-from loss.regulariser import UnoTransformRegularizer
+from loss.regulariser import UnoTransformRegularizer, DualTransformRegularizer
 from gan.loss.gan_loss import StyleGANLoss, StyleGANLossWithoutPenalty
 from model import Generator
 from dataset.toheatmap import ToHeatMap, heatmap_to_measure
@@ -26,16 +26,16 @@ from torch import nn, Tensor
 from torch.utils import data
 from torch.utils.tensorboard import SummaryWriter
 from dataset.lazy_loader import LazyLoader, W300DatasetLoader, CelebaWithKeyPoints, Celeba
-from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure
+from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure, UniformMeasure2DFactory
 from gan.gan_model import cont_style_munit_enc, CondGen3, CondDisc3, CondStyleGanModel
 from metrics.writers import ItersCounter, send_images_to_tensorboard
 from models.munit.enc_dec import MunitEncoder, StyleEncoder
 from modules.hg import hg2, final_preds_untransformed, hg8, hg4, HG_softmax2020
 from gan.loss_base import Loss
-from transforms_utils.transforms import MeasureToMask, ToNumpy, ToTensor, MaskToMeasure, NumpyBatch, MeasureToKeyPoints
+from transforms_utils.transforms import MeasureToMask, ToNumpy, ToTensor, MaskToMeasure, NumpyBatch, MeasureToKeyPoints, \
+    ResizeMask, NormalizeMask
 
-
-device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 torch.cuda.set_device(device)
 
@@ -123,9 +123,9 @@ generator = CondGen3(Generator(
 discriminator = discriminator.to(device)
 generator = generator.to(device)
 
-discriminator = nn.DataParallel(discriminator, [0, 1, 2])
-generator = nn.DataParallel(generator, [0, 1, 2])
-# encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 2])
+discriminator = nn.DataParallel(discriminator, [0, 1, 3])
+generator = nn.DataParallel(generator, [0, 1, 3])
+encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 3])
 
 model = CondStyleGanModel(generator, StyleGANLoss(discriminator), (0.0006, 0.001))
 loss_without_penalty = StyleGANLossWithoutPenalty(discriminator)
@@ -159,6 +159,46 @@ w300_test = next(iter(LazyLoader.w300().test_loader))
 w300_test_image = w300_test['data'].to(device)[:8]
 
 
+def hm_svoego_roda_loss(pred, target, coef=1.0, l1_coef = 0.0):
+    pred_mes = UniformMeasure2DFactory.from_heatmap(pred)
+    target_mes = UniformMeasure2DFactory.from_heatmap(target)
+
+    # pred = pred.relu() + 1e-15
+    # target[target < 1e-7] = 0
+    # target[target > 1 - 1e-7] = 1
+
+    if torch.isnan(pred).any() or torch.isnan(target).any():
+        print("nan in hm")
+        return Loss.ZERO()
+
+    bce = nn.BCELoss()(pred, target)
+
+    if torch.isnan(bce).any():
+        print("nan in bce")
+        return Loss.ZERO()
+
+    return Loss(
+        bce * coef +
+        nn.MSELoss()(pred_mes.coord, target_mes.coord) * (0.0005 * coef) +
+        nn.L1Loss()(pred_mes.coord, target_mes.coord) * l1_coef
+    )
+
+g_transforms: albumentations.DualTransform = albumentations.Compose([
+    ToNumpy(),
+    NumpyBatch(albumentations.Compose([
+        ResizeMask(h=256, w=256),
+        albumentations.ElasticTransform(p=0.7, alpha=150, alpha_affine=1, sigma=10),
+        albumentations.ShiftScaleRotate(p=0.7, rotate_limit=10),
+        ResizeMask(h=64, w=64),
+        NormalizeMask(dim=(0, 1, 2))
+    ])),
+    ToTensor(device),
+])
+
+R_t = DualTransformRegularizer.__call__(
+    g_transforms, lambda trans_dict, img:
+    hm_svoego_roda_loss(encoder_HG(trans_dict['image']), trans_dict['mask'], 1, 0.1)
+)
 
 for i in range(100000):
 
@@ -171,7 +211,10 @@ for i in range(100000):
 
     content300 = encoder_HG(w300_image)
 
-    loss_or_none = writable("real_content loss", hm_svoego_roda_loss)(content300, w300_target_hm)
+    loss_or_none = (
+        writable("real_content loss", hm_svoego_roda_loss)(content300, w300_target_hm) +
+        writable("R_t", R_t.__call__)(w300_image, content300) * 0.05
+    )
 
     loss_or_none.minimize_step(enc_opt)
 
@@ -183,12 +226,12 @@ for i in range(100000):
     # noise = mixing_noise(W300DatasetLoader.batch_size, latent_size, 0.9, device)
     # fake, _ = generator(content_celeba_detachted, noise)
     #
-    # fake_content = encoder_HG(fake)
+    # # fake_content = encoder_HG(fake)
     #
-    # tuner.sum_losses([
-    #     model.loss.generator_loss(real=None, fake=[real_img, content_celeba]) * 0.1,
+    # (
+    #     # model.loss.generator_loss(real=None, fake=[real_img, content_celeba]) * 0.1,
     #     writable("fake_content loss", hm_svoego_roda_loss)(fake_content, content_celeba_detachted)
-    # ]).minimize_step(enc_opt)
+    # ).minimize_step(enc_opt)
 
 
     #     loss_without_penalty._discriminator_loss(discriminator(real_img, content_celeba), discriminator(fake.detach(), content_celeba)) * (-5)
@@ -226,7 +269,7 @@ for i in range(100000):
             # (HMLoss("BCE content gan", 1)(fake_content_pred, img_content.detach()) +
             # disc_influence).minimize_step(enc_opt)
 
-    if i % 50 == 0 and i > 0 :
+    if i % 50 == 0 and i > 0:
         with torch.no_grad():
             test_loss = test(encoder_HG)
             print(test_loss)

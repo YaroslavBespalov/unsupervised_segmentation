@@ -1,3 +1,4 @@
+import json
 import sys, os
 
 import albumentations
@@ -37,7 +38,6 @@ from torch.nn import functional as F
 from torch.utils import data
 import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
-from matplotlib import pyplot as plt
 
 from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset
 from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric, UniformMeasure2DFactory, \
@@ -165,6 +165,8 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
         batch_size = real_img.shape[0]
         latent_size = 512
 
+        coefs = json.load(open("../parameters/gan_loss.json"))
+
         noise = mixing_noise(batch_size, latent_size, 0.9, device)
         fake, fake_latent = generator(img_content, noise, return_latents=True)
 
@@ -184,10 +186,10 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
 
             restored = decoder(img_content, style_encoder(real_img))
             (
-                    writable("BCE content gan", hm_svoego_roda_loss)(fake_content_pred, img_content, 5000) * 3.0 +
-                    L1("L1 restored")(restored, real_img) * 50 +
-                    L1("L1 style gan")(fake_latent_pred, fake_latent_test) * 30 +
-                    R_s(fake.detach(), fake_latent_pred) * 50
+                    writable("BCE content gan", hm_svoego_roda_loss)(fake_content_pred, img_content, 5000) * coefs["BCE content gan"] +
+                    L1("L1 restored")(restored, real_img) * coefs["L1 restored"] +
+                    L1("L1 style gan")(fake_latent_pred, fake_latent_test) * coefs["L1 style gan"] +
+                    R_s(fake.detach(), fake_latent_pred) * coefs["R_s"]
             ).minimize_step(
                 model.optimizer.opt_min,
                 style_opt
@@ -226,7 +228,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
     model = CondStyleGanModel(generator, loss_st, (0.001, 0.0015))
 
     style_opt = optim.Adam(style_encoder.parameters(), lr=5e-4, betas=(0.9, 0.99))
-    cont_opt = optim.Adam(encoder_HG.parameters(), lr=2e-5, betas=(0.5, 0.97))
+    cont_opt = optim.Adam(encoder_HG.parameters(), lr=4e-5, betas=(0.5, 0.97))
 
     g_transforms: albumentations.DualTransform = albumentations.Compose([
         ToNumpy(),
@@ -254,9 +256,11 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
     # plt.imshow(barycenter.toImage(256)[0][0].detach().cpu().numpy())
     # plt.show()
 
-    R_b = BarycenterRegularizer.__call__(barycenter)
+    R_b = BarycenterRegularizer.__call__(barycenter, 1.0, 2.0, 3.0)
 
-    tuner = GoldTuner([3.0, 3.0, 1.2, 2.0, 1.5, 1.2], device=device, rule_eps=0.05, radius=1, active=True)
+    #                  4.5, 1.2, 1.12, 1.4, 0.07, 2.2
+    #                  1.27, 3.55, 5.88, 3.83, 2.17, 0.22, 1.72
+    tuner = GoldTuner([2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0], device=device, rule_eps=0.1, radius=1, active=True)
     # tuner_verka = GoldTuner([3.0, 1.2, 2.0], device=device, rule_eps=0.05, radius=1, active=True)
 
     best_igor = 100
@@ -267,9 +271,9 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
     for i in range(100000):
         counter.update(i)
 
-        decoder = CondGenDecode(generator.module)
-        decoder = nn.DataParallel(decoder, [0, 1, 2])
-        trainer_gan = gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style_opt)
+        # decoder = CondGenDecode(generator.module)
+        # decoder = nn.DataParallel(decoder, [0, 1, 2])
+        # trainer_gan = gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style_opt)
 
         requires_grad(encoder_HG, False)  # REMOVE BEFORE TRAINING
         real_img = next(LazyLoader.celeba().loader).to(device)
@@ -289,11 +293,12 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
         trainer_gan(i, real_img, img_content)
 
 
-        if i % 5 == 0:
-
+        if i % 3 == 0:
+            # TODO: load new real image to reduce dependence between content and fake
             requires_grad(encoder_HG, True)
             img_content = encoder_HG(real_img)
             pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(img_content)
+            # TODO: low val to zero
             sparce_hm = heatmaper.forward(pred_measures.coord * 63).detach()
 
             img_latent = style_encoder(real_img)
@@ -301,26 +306,28 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
 
             noise1 = mixing_noise(batch_size, latent_size, 0.9, device)
             # noise2 = mixing_noise(batch_size, latent_size, 0.9, device)
-            fake1, _ = generator(img_content.detach(), noise1)
+            fake1, _ = generator(img_content, noise1)
             # fake2, _ = generator(img_content[:16].detach(), noise2)
 
             cont_fake1 = encoder_HG(fake1.detach())
             # cont_fake2 = encoder_HG(fake2)
-
+            # TODO: add L1 to Sparse
+            coefs = json.load(open("../parameters/content_loss.json"))
             tuner.sum_losses([
-                writable("Real-content D", model.loss.generator_loss)(real=None, fake=[real_img, img_content]) * 1.0,  # 3e-5
-                writable("R_b", R_b.__call__)(real_img, pred_measures) * 0.5,
-                writable("Sparse", hm_svoego_roda_loss)(img_content, sparce_hm, 500) * 0.5,
-                writable("R_t", R_t.__call__)(real_img, sparce_hm) * 3.5,
+                writable("Fake-content D", model.loss.generator_loss)(real=None, fake=[fake1, img_content.detach()]) * coefs["Fake-content D"], # 800
+                writable("Real-content D", model.loss.generator_loss)(real=None, fake=[real_img, img_content]) * coefs["Real-content D"],  # 5
+                writable("R_b", R_b.__call__)(real_img, pred_measures) * coefs["R_b"],  # 3000
+                writable("Sparse", hm_svoego_roda_loss)(img_content, sparce_hm, 500) * coefs["Sparse"], # 500
+                writable("R_t", R_t.__call__)(real_img, sparce_hm) * coefs["R_t"],  # 16155
                 # L1("L1 content between fake")(cont_fake1, cont_fake2),  # 1e-6
-                L1("L1 image")(restored, real_img) * 1.0,  # 4e-5
-                writable("fake_content loss", hm_svoego_roda_loss)(cont_fake1, img_content.detach(), 500) * 3.0
+                L1("L1 image")(restored, real_img) * coefs["L1 image"],  # 10
+                writable("fake_content loss", hm_svoego_roda_loss)(cont_fake1, img_content.detach(), 500, 0.1) * coefs["fake_content loss"] # 6477
             ]).minimize_step(
                 cont_opt
             )
 
         if i % 100 == 0:
-            print(i)
+            print(i, coefs)
             with torch.no_grad():
 
                 content_test = encoder_HG(test_img)
@@ -338,7 +345,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
                 iwm = imgs_with_mask(restored, pred_measures.toImage(256))
                 send_images_to_tensorboard(writer, iwm, "RESTORED", i)
 
-        if i % 100 == 0 and i > 0:
+        if i % 50 == 0 and i > 0:
             test_loss = verka(encoder_HG)
             tuner.update(test_loss)
             writer.add_scalar("verka", test_loss, i)
@@ -377,7 +384,7 @@ if __name__ == '__main__':
 
     style_encoder = StyleEncoder(style_dim=latent)
 
-    starting_model_number = 30000
+    starting_model_number = 70000
     weights = torch.load(
         f'{Paths.default.models()}/stylegan2_new_{str(starting_model_number).zfill(6)}.pt',
         map_location="cpu"
@@ -393,9 +400,9 @@ if __name__ == '__main__':
     style_encoder = style_encoder.cuda()
     decoder = CondGenDecode(generator)
 
-    generator = nn.DataParallel(generator, [0, 1, 2])
-    discriminator = nn.DataParallel(discriminator, [0, 1, 2])
-    encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 2])
-    decoder = nn.DataParallel(decoder, [0, 1, 2])
+    generator = nn.DataParallel(generator, [0, 1, 3])
+    discriminator = nn.DataParallel(discriminator, [0, 1, 3])
+    encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 3])
+    decoder = nn.DataParallel(decoder, [0, 1, 3])
 
     train(generator, decoder, discriminator, encoder_HG, style_encoder, device, starting_model_number)

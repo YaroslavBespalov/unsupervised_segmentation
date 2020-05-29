@@ -37,6 +37,12 @@ class ToImage2D(nn.Module):
         prob_cc = (coord_0 - coord_0_f).abs() * (coord_1 - coord_1_f).abs() * values
 
         img = torch.zeros([batch, size * size], dtype=torch.float32, device=coord.device)
+
+        assert indexes_ff.max().item() < size * size
+        assert indexes_fc.max().item() < size * size
+        assert indexes_cf.max().item() < size * size
+        assert indexes_cc.max().item() < size * size
+
         img.scatter_add_(1, indexes_ff, prob_ff)
         img.scatter_add_(1, indexes_fc, prob_fc)
         img.scatter_add_(1, indexes_cf, prob_cf)

@@ -6,6 +6,7 @@ import os
 import albumentations
 
 from loss.losses import Samples_Loss
+from loss.regulariser import DualTransformRegularizer
 from parameters.path import Paths
 from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure, ResizeMask, \
     NormalizeMask
@@ -24,7 +25,7 @@ from torch import nn, Tensor
 from torch.utils.tensorboard import SummaryWriter
 
 from dataset.lazy_loader import LazyLoader, W300DatasetLoader
-from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure
+from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure, UniformMeasure2DFactory
 from metrics.writers import ItersCounter, send_images_to_tensorboard
 from modules.hg import HG_softmax2020
 from gan.loss_base import Loss
@@ -121,22 +122,6 @@ W1 = Samples_Loss(scaling=0.85, p=1)
 #         ToTensor(device),
 #     ])
 
-g_transforms: albumentations.DualTransform = albumentations.Compose([
-    ToNumpy(),
-    NumpyBatch(albumentations.Compose([
-        ResizeMask(h=256, w=256),
-        albumentations.ElasticTransform(p=0.7, alpha=150, alpha_affine=1, sigma=10),
-        albumentations.ShiftScaleRotate(p=0.7, rotate_limit=10),
-        ResizeMask(h=64, w=64),
-        NormalizeMask(dim=(0, 1, 2))
-    ])),
-    # NumpyBatch(ResizeMask(h=256, w=256)),
-    # NumpyBatch(albumentations.ElasticTransform(p=0.8, alpha=150, alpha_affine=1, sigma=10)),
-    # NumpyBatch(albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10)),
-    # NumpyBatch(ResizeMask(h=64, w=64)),
-    # NumpyBatch(NormalizeMask(dim=(0, 1, 2))),
-    ToTensor(device),
-])
 
 
 for epoch in range(30):
