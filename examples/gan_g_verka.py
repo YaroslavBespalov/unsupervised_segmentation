@@ -9,7 +9,7 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
-from dataset.lazy_loader import LazyLoader, Celeba
+from dataset.lazy_loader import LazyLoader, Celeba, W300DatasetLoader
 from dataset.toheatmap import heatmap_to_measure, ToHeatMap, sparse_heatmap, ToGaussHeatMap
 from modules.hg import HG_softmax2020
 from parameters.path import Paths
@@ -182,10 +182,7 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
         if i % 5 == 0:
             noise = mixing_noise(batch_size, latent_size, 0.9, device)
 
-            trans_dict = g_transforms(image=real_img, mask=img_content)
-            trans_img_content = trans_dict["mask"]
-
-            fake, fake_latent = generator(trans_img_content, noise, return_latents=True)
+            fake, fake_latent = generator(img_content, noise, return_latents=True)
 
             fake_latent_test = fake_latent[:, [0, 13], :].detach()
             fake_latent_pred = style_encoder(fake)
@@ -193,7 +190,7 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
 
             restored = decoder(trans_sparse_hm, style_encoder(real_img))
             (
-                    writable("BCE content gan", hm_svoego_roda_loss)(fake_content_pred, trans_img_content, 5000) * coefs["BCE content gan"] +
+                    writable("BCE content gan", hm_svoego_roda_loss)(fake_content_pred, img_content, 5000) * coefs["BCE content gan"] +
                     L1("L1 restored")(restored, trans_real_img) * coefs["L1 restored"] +
                     L1("L1 style gan")(fake_latent_pred, fake_latent_test) * coefs["L1 style gan"] +
                     R_s(fake.detach(), fake_latent_pred) * coefs["R_s"]
@@ -248,9 +245,9 @@ def content_trainer_with_gan(cont_opt, tuner, heatmaper, encoder_HG, R_b, R_t, m
             writable("Fake-content D", model.loss.generator_loss)(
                 real=None,
                 fake=[fake1, img_content.detach()]) * coefs["Fake-content D"],  # 800
-            writable("Real-content D", model.loss.discriminator_loss_as_is)(
-                [real_img, img_content],
-                [fake1.detach(), img_content]) * (-1) * coefs["Real-content D"],  # 5
+            writable("Real-content D", model.loss.generator_loss)(
+                real=None,
+                fake=[real_img, img_content]) * coefs["Real-content D"],  # 5
             writable("R_b", R_b.__call__)(real_img, pred_measures) * coefs["R_b"],  # 3000
             writable("Sparse", hm_svoego_roda_loss)(img_content, sparce_hm.detach(), 500) * coefs["Sparse"],  # 500
             writable("R_t", R_t.__call__)(real_img, img_content) * coefs["R_t"],  # 16155
@@ -308,7 +305,6 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
 
     #                  4.5, 1.2, 1.12, 1.4, 0.07, 2.2
     #                  1.27, 3.55, 5.88, 3.83, 2.17, 0.22, 1.72
-    #                 [2.2567, 1.4964, 3.5236, 4.2484, 1.8099, 0.3754, 5.14]
     tuner = GoldTuner([2.2112, 2.3467, 3.8438, 3.2202, 2.0494, 0.0260, 5.8378], device=device, rule_eps=0.03, radius=1, active=True)
     # tuner_verka = GoldTuner([3.0, 1.2, 2.0], device=device, rule_eps=0.05, radius=1, active=True)
 
@@ -377,7 +373,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
 
 
 if __name__ == '__main__':
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
     print(device)
     torch.cuda.set_device(device)
     encoder_HG = HG_softmax2020(num_classes=68, heatmap_size=64)
@@ -392,31 +388,76 @@ if __name__ == '__main__':
         size, latent, n_mlp, channel_multiplier=1
     ))
 
-    discriminator = CondDisc3(
-        size, channel_multiplier=1
-    )
+    # discriminator = CondDisc3(
+    #     size, channel_multiplier=1
+    # )
+    #
+    # style_encoder = StyleEncoder(style_dim=latent)
 
-    style_encoder = StyleEncoder(style_dim=latent)
-
-    starting_model_number = 130000
+    starting_model_number = 100000
     weights = torch.load(
         f'{Paths.default.models()}/stylegan2_new_{str(starting_model_number).zfill(6)}.pt',
         map_location="cpu"
     )
-    discriminator.load_state_dict(weights['d'])
+    # discriminator.load_state_dict(weights['d'])
     generator.load_state_dict(weights['g'])
-    style_encoder.load_state_dict(weights['s'])
+    # style_encoder.load_state_dict(weights['s'])
     encoder_HG.load_state_dict(weights['c'])
 
     generator = generator.cuda()
-    discriminator = discriminator.to(device)
+    # discriminator = discriminator.to(device)
     encoder_HG = encoder_HG.cuda()
-    style_encoder = style_encoder.cuda()
+    # style_encoder = style_encoder.cuda()
     decoder = CondGenDecode(generator)
 
-    generator = nn.DataParallel(generator, [0, 1, 3])
-    discriminator = nn.DataParallel(discriminator, [0, 1, 3])
-    encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 3])
-    decoder = nn.DataParallel(decoder, [0, 1, 3])
+    # generator = nn.DataParallel(generator, [0, 1, 3])
+    # discriminator = nn.DataParallel(discriminator, [0, 1, 3])
+    # encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 3])
+    # decoder = nn.DataParallel(decoder, [0, 1, 3])
 
-    train(generator, decoder, discriminator, encoder_HG, style_encoder, device, starting_model_number)
+    test_img = next(LazyLoader.celeba().loader)[:4].cuda()
+    heatmaper = ToGaussHeatMap(64, 1.5)
+    sample_z = torch.randn(4, 512, device=device)
+    noise = mixing_noise(4, 512, 0.9, device)
+
+    LazyLoader.w300_save = None
+    W300DatasetLoader.test_batch_size = 4
+    w300_test = next(iter(LazyLoader.w300().test_loader))
+    w300_test_image = w300_test['data'].to(device)[:4]
+    w300_test_mask = ProbabilityMeasureFabric(256).from_coord_tensor(
+    w300_test["meta"]["keypts_normalized"][:4].to(device))
+    sparse_hm = heatmaper.forward(w300_test_mask.coord * 63).detach()
+
+    g_transforms: albumentations.DualTransform = albumentations.Compose([
+        ToNumpy(),
+        NumpyBatch(albumentations.Compose([
+            ResizeMask(h=256, w=256),
+            albumentations.ElasticTransform(p=1, alpha=150, alpha_affine=1, sigma=10),
+            # albumentations.ShiftScaleRotate(p=0.7, rotate_limit=15),
+            ResizeMask(h=64, w=64),
+            NormalizeMask(dim=(0, 1, 2))
+        ])),
+        ToTensor(device),
+    ])
+
+    with torch.no_grad():
+        from matplotlib import pyplot as plt
+        content_test = encoder_HG(test_img)
+        pred_measures = UniformMeasure2DFactory.from_heatmap(content_test)
+        sparce_hm = heatmaper.forward(pred_measures.coord * 63).detach()
+
+        fake_img, _ = generator(sparce_hm, noise)
+        iwm = imgs_with_mask(fake_img, pred_measures.toImage(256))
+        plt.imshow(((iwm[0].permute(1, 2, 0) + 1) / 2).cpu().numpy())
+        plt.show()
+
+        trans_dict = g_transforms(image=test_img, mask=sparce_hm)
+        sparce_hm = trans_dict["mask"]
+        pred_measures = UniformMeasure2DFactory.from_heatmap(sparce_hm)
+
+        #iwm = imgs_with_mask(test_img, pred_measures.toImage(256))
+
+        fake_img, _ = generator(sparce_hm, noise)
+        iwm = imgs_with_mask(fake_img, pred_measures.toImage(256))
+        plt.imshow(((iwm[0].permute(1,2,0) + 1) / 2).cpu().numpy())
+        plt.show()
