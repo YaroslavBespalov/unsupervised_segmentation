@@ -8,9 +8,11 @@ from torch.utils.data import DataLoader
 
 from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset, CelebaWithLandmarks
 from dataset.d300w import ThreeHundredW
+from dataset.MAFL import MAFLDataset
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 
 from parameters.path import Paths
+
 
 
 def data_sampler(dataset, shuffle, distributed):
@@ -120,7 +122,6 @@ class Celeba:
         ])
 
     def __init__(self):
-
         print("init calaba")
 
         dataset = ImageDataset(
@@ -143,18 +144,59 @@ class Celeba:
         self.loader = sample_data(self.loader)
 
 
+class MAFL:
+
+    batch_size = 8
+    test_batch_size = 32
+
+    def __init__(self):
+        dataset_train = MAFLDataset(f"{Paths.default.data()}", split="train", target_type="landmarks")
+
+        self.loader_train = data.DataLoader(
+            dataset_train,
+            batch_size=MAFL.batch_size,
+            sampler=data_sampler(dataset_train, shuffle=True, distributed=False),
+            drop_last=True,
+            num_workers=20
+        )
+
+        self.loader_train_inf = sample_data(self.loader_train)
+
+        self.test_dataset = MAFLDataset(f"{Paths.default.data()}", split="train", target_type="landmarks")
+
+        self.test_loader = data.DataLoader(
+            self.test_dataset,
+            batch_size=MAFL.test_batch_size,
+            drop_last=False,
+            num_workers=20
+        )
+
+        print("MAFL initialize")
+        print(f"train size: {len(dataset_train)}, test size: {len(self.test_dataset)}")
+
+        self.test_loader_inf = sample_data(self.test_loader)
+
+
 class LazyLoader:
 
     w300_save: Optional[W300DatasetLoader] = None
     celeba_kp_save: Optional[CelebaWithKeyPoints] = None
     celeba_save: Optional[Celeba] = None
     celebaWithLandmarks: Optional[CelebaWithLandmarks] = None
+    mafl_save: Optional[MAFL] = None
+
 
     @staticmethod
     def w300() -> W300DatasetLoader:
         if not LazyLoader.w300_save:
             LazyLoader.w300_save = W300DatasetLoader()
         return LazyLoader.w300_save
+
+    @staticmethod
+    def mafl() -> MAFL:
+        if not LazyLoader.mafl_save:
+            LazyLoader.mafl_save = MAFL()
+        return LazyLoader.mafl_save
 
     @staticmethod
     def celeba_with_kps():

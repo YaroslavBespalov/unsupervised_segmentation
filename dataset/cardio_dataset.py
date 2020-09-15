@@ -1,4 +1,6 @@
 import os
+from os.path import isdir
+
 import torch
 import torchvision
 from torch import Tensor
@@ -84,6 +86,8 @@ class ImageDataset(Dataset):
         self.imgs = []
 
         for folder in image_folders:
+            if not isdir(os.path.join(images_path, folder)):
+                continue
             for img in os.listdir(os.path.join(images_path, folder)):
                 img_path = os.path.join(images_path, folder, img)
                 self.imgs += [img_path]

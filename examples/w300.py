@@ -1,3 +1,4 @@
+import json
 import time
 from typing import Callable, Any
 import sys
@@ -24,7 +25,7 @@ from torch import optim
 from torch import nn, Tensor
 from torch.utils.tensorboard import SummaryWriter
 
-from dataset.lazy_loader import LazyLoader, W300DatasetLoader
+from dataset.lazy_loader import LazyLoader, W300DatasetLoader, Celeba
 from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure, UniformMeasure2DFactory
 from metrics.writers import ItersCounter, send_images_to_tensorboard
 from modules.hg import HG_softmax2020
@@ -79,14 +80,15 @@ def test(enc):
 
 
 encoder_HG = HG_softmax2020(num_classes=68, heatmap_size=64)
-encoder_HG.load_state_dict(torch.load(f"{Paths.default.models()}/hg2_e29.pt", map_location="cpu"))
+# encoder_HG.load_state_dict(torch.load(f"{Paths.default.models()}/hg2_e29.pt", map_location="cpu"))
 encoder_HG = encoder_HG.cuda()
-encoder_HG = nn.DataParallel(encoder_HG, [0, 1])
+encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 3])
 
-cont_opt = optim.Adam(encoder_HG.parameters(), lr=1e-5, betas=(0.5, 0.97))
+cont_opt = optim.Adam(encoder_HG.parameters(), lr=5e-5, betas=(0.5, 0.97))
 
-W300DatasetLoader.batch_size = 8
-W300DatasetLoader.test_batch_size = 8
+W300DatasetLoader.batch_size = 36
+W300DatasetLoader.test_batch_size = 36
+Celeba.batch_size = 36
 
 heatmaper = ToHeatMap(64)
 
@@ -104,27 +106,38 @@ heatmaper = ToHeatMap(64)
 #     ToTensor(device)
 # ])
 
-W1 = Samples_Loss(scaling=0.85, p=1)
-
-# R_t = DualTransformRegularizer.__call__(
-#     g_transforms, lambda trans_dict, img:
-#     W1(content_to_measure(cont_style_encoder.get_content(trans_dict['image'])), trans_dict['mask'])  # +
-#     # W2(content_to_measure(cont_style_encoder.get_content(trans_dict['image'])), trans_dict['mask'])
-# )
-
-# g_transforms: albumentations.DualTransform = albumentations.Compose([
-#         ToNumpy(),
-#         NumpyBatch(ResizeMask(h=256, w=256)),
-#         NumpyBatch(albumentations.ElasticTransform(p=1, alpha=150, alpha_affine=1, sigma=10)),
-#         NumpyBatch(albumentations.ShiftScaleRotate(p=1, rotate_limit=10)),
-#         NumpyBatch(ResizeMask(h=64, w=64)),
-#         NumpyBatch(NormalizeMask(dim=(0,1,2))),
-#         ToTensor(device),
-#     ])
+g_transforms: albumentations.DualTransform = albumentations.Compose([
+    ToNumpy(),
+    NumpyBatch(albumentations.Compose([
+        ResizeMask(h=256, w=256),
+        albumentations.ElasticTransform(p=0.7, alpha=150, alpha_affine=1, sigma=10),
+        albumentations.ShiftScaleRotate(p=0.7, rotate_limit=15),
+        ResizeMask(h=64, w=64),
+        NormalizeMask(dim=(0, 1, 2))
+    ])),
+    ToTensor(device),
+])
 
 
+def hm_svoego_roda_loss(pred, target):
 
-for epoch in range(30):
+    pred_xy, _ = heatmap_to_measure(pred)
+    t_xy, _ = heatmap_to_measure(target)
+
+    return Loss(
+        nn.BCELoss()(pred, target) +
+        nn.MSELoss()(pred_xy, t_xy) * 0.0005 +
+        (pred - target).abs().mean() * 0.3
+    )
+
+
+R_t = DualTransformRegularizer.__call__(
+    g_transforms, lambda trans_dict, img:
+    hm_svoego_roda_loss(encoder_HG(trans_dict['image']), trans_dict['mask'])
+)
+
+
+for epoch in range(130):
     for i, batch in enumerate(LazyLoader.w300().loader_train):
         # print(i)
         counter.update(i + epoch*len(LazyLoader.w300().loader_train))
@@ -133,34 +146,27 @@ for epoch in range(30):
         mes = ProbabilityMeasureFabric(256).from_coord_tensor(batch["meta"]["keypts_normalized"]).cuda()
         target_hm = heatmaper.forward(mes.probability, mes.coord * 63)
 
-
         content = encoder_HG(data)
-        content_xy, prob = heatmap_to_measure(target_hm)
+        hm_svoego_roda_loss(content, target_hm).minimize_step(cont_opt)
 
-        transformed_res = g_transforms(image=data, mask=target_hm)
-        trans_image = transformed_res["image"]
-        trans_content = transformed_res["mask"]
-        content_xy, prob = heatmap_to_measure(trans_content)
+        if i % 5 == 0:
+            real_img = next(LazyLoader.celeba().loader).to(device)
+            content = encoder_HG(data)
+            coefs = json.load(open("../parameters/content_loss.json"))
+            R_t(real_img, content).__mul__(coefs["R_t"]).minimize_step(cont_opt)
 
-        lossyash = Loss(
-            nn.BCELoss()(content, target_hm) +
-            nn.MSELoss()(content_xy, mes.coord) * 0.0005 +
-            (content - target_hm).abs().mean() * 0.3
-        )
-
-        lossyash.minimize_step(cont_opt)
         # writer.add_scalar("L1", lossyash.item(), i + epoch*len(LazyLoader.w300().loader_train))
         if i % 100 == 0:
-            print(i)
-            with torch.no_grad():
-                trans = albumentations.Resize(256, 256)
-                # plt.imshow(trans(image=trans_content[0].sum(0).cpu().detach().numpy())["image"] * 100 + trans_image[0][0].cpu().detach().numpy())
-                mask = ProbabilityMeasure(prob, content_xy).toImage(256)
-                transformed_res = imgs_with_mask(trans_image, mask)
-                send_images_to_tensorboard(writer, transformed_res, "W300_test_image", i + epoch*len(LazyLoader.w300().loader_train))
-                # plt.show()
-                # test_loss = test(encoder_HG)
-                # writer.add_scalar("test_loss", test_loss, i + epoch*len(LazyLoader.w300().loader_train))
+        #     print(i)
+        #     with torch.no_grad():
+        #         trans = albumentations.Resize(256, 256)
+        #         # plt.imshow(trans(image=trans_content[0].sum(0).cpu().detach().numpy())["image"] * 100 + trans_image[0][0].cpu().detach().numpy())
+        #         mask = ProbabilityMeasure(prob, content_xy).toImage(256)
+        #         # transformed_res = imgs_with_mask(trans_image, mask)
+        #         send_images_to_tensorboard(writer, transformed_res, "W300_test_image", i + epoch*len(LazyLoader.w300().loader_train))
+        #         # plt.show()
+                test_loss = test(encoder_HG)
+                writer.add_scalar("test_loss", test_loss, i + epoch*len(LazyLoader.w300().loader_train))
 
     # torch.save(enc.state_dict(), f"/home/ibespalov/pomoika/hg2_e{epoch}.pt")
 

@@ -1,3 +1,5 @@
+import random
+
 import albumentations
 import torch
 from torch import nn, Tensor
@@ -33,7 +35,8 @@ def center_by_face(image: torch.Tensor, landmarks: torch.Tensor):
     transforms = albumentations.Compose([
         albumentations.Crop(x_min=0, y_min=0, x_max=W, y_max=H09),
         albumentations.Resize(rh, rw),
-        albumentations.RandomCrop(256, 256)
+        albumentations.RandomCrop(256, 256),
+        # albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
     data_dict = transforms(image=image, keypoints=[keypoints_landmarks])
     image_new = torch.tensor(np.transpose(data_dict['image'], (2,0,1)))
@@ -162,11 +165,17 @@ class ThreeHundredW(Dataset):
         else:
             assert len(self.filenames) == 689
 
-        normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-        augmentations = [transforms.ToTensor()] if train else [transforms.ToTensor()]
-
-        self.initial_transforms = transforms.Compose([transforms.Resize((self.imwidth, self.imwidth))])
-        self.transforms = transforms.Compose(augmentations + [normalize])
+        # normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        # augmentations = [transforms.ToTensor()] if train else [transforms.ToTensor()]
+        #
+        # self.initial_transforms = transforms.Compose([transforms.Resize((self.imwidth, self.imwidth))])
+        # self.transforms = transforms.Compose(augmentations)
+        # self.transforms = transforms.Compose(augmentations + [normalize])
+        self.transforms = albumentations.Compose([
+            albumentations.Resize(self.imwidth, self.imwidth),
+            albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            albumentations.ToTensorV2()
+        ])
 
     def __len__(self):
         return len(self.filenames)
@@ -176,6 +185,15 @@ class ThreeHundredW(Dataset):
         im = Image.open(os.path.join(self.root, self.filenames[index])).convert("RGB")
         # Crop bounding box
         xmin, ymin, xmax, ymax = self.bounding_boxes[index]
+
+        pm = random.randint(0, 20)
+
+        if self.train:
+            xmax = min(xmax + pm, im.width)
+            xmin = max(xmin - pm, 0)
+            ymax = min(ymax + pm, im.height)
+            ymin = max(ymin - pm, 0)
+
         keypts = self.keypoints[index]
 
         # This is basically copied from matlab code and assumes matlab indexing
@@ -217,18 +235,8 @@ class ThreeHundredW(Dataset):
         kp = keypts - 1  # from matlab to python style
         kp = kp * self.imwidth / preresize_sz
         kp = torch.tensor(kp)
-        meta = {}
 
-        data = self.transforms(self.initial_transforms(im.convert("RGB")))
-        # if self.crop != 0:
-        #     data = data[:, 0:-self.crop, self.crop:-self.crop]
-        C, H, W = data.shape
-
-        # kp[:, 1] = kp[:, 1] * ((H-self.crop)/H)
-        # kp[:, 0] = kp[:, 0] - self.crop
-        # kp = torch.tensor(kp)
-
-        # data, kp = center_by_face(data, kp[:, [1, 0]])
+        data = self.transforms(image=np.array(im))["image"]
         data, kp = center_by_face(data, kp[:, [1, 0]]) # kp[:, [0, 1]])
         C, H, W = data.shape
         meta = {'keypts': kp, 'keypts_normalized': kp_normalize(W, H, kp), 'index': index}

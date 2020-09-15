@@ -22,10 +22,10 @@ def tensorboard_scatter(tensor : Tensor, writer: SummaryWriter, step: int):
     writer.add_figure('Measure', fig, global_step=step)
 
 
-def send_images_to_tensorboard(writer, data: Tensor, name: str, iter: int, count=8):
+def send_images_to_tensorboard(writer, data: Tensor, name: str, iter: int, count=8, normalize=True, range=(-1, 1)):
     with torch.no_grad():
         grid = make_grid(
-            data[0:count], nrow=count, padding=2, pad_value=0, normalize=True, range=(-1, 1),
+            data[0:count], nrow=count, padding=2, pad_value=0, normalize=normalize, range=range,
             scale_each=False)
         writer.add_image(name, grid, iter)
 

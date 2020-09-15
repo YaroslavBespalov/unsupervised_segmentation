@@ -368,7 +368,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
     test_img = next(LazyLoader.celeba().loader)[:8].cuda()
 
     loss_st: StyleGANLoss = StyleGANLoss(discriminator)
-    model = CondStyleGanModel(generator, loss_st, (0.001, 0.0015))
+    model = CondStyleGanModel(generator, loss_st, (0.001/4, 0.0015/4))
 
     style_opt = optim.Adam(style_encoder.parameters(), lr=5e-4, betas=(0.9, 0.99))
     cont_opt = optim.Adam(encoder_HG.parameters(), lr=1e-5, betas=(0.5, 0.97))
@@ -418,7 +418,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
 
         requires_grad(encoder_HG, False)  # REMOVE BEFORE TRAINING
         real_img = next(LazyLoader.celeba().loader).to(device)
-            # if i % 5 == 0 else next(LazyLoader.w300().loader_train_inf)['data'].to(device)
+        # if i % 5 == 0 else next(LazyLoader.w300().loader_train_inf)['data'].to(device)
 
         img_content = encoder_HG(real_img)
         pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(img_content)

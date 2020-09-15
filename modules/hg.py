@@ -6,8 +6,9 @@ import torch.nn.functional as F
 import logging
 from torch import Tensor
 from typing import List
-from dataset.toheatmap import ToHeatMap, heatmap_to_measure
 
+from dataset.probmeasure import UniformMeasure2D01, UniformMeasure2DFactory
+from dataset.toheatmap import ToHeatMap, heatmap_to_measure, ToGaussHeatMap
 
 
 def get_preds(scores):
@@ -314,6 +315,21 @@ class HG_softmax2020(nn.Module):
         coords, p = heatmap_to_measure(heatmaps)
         return coords
 
+
+class GHSparse(nn.Module):
+
+    def __init__(self, gh: nn.Module):
+        super().__init__()
+        self.gh = gh
+        self.heatmaper = ToGaussHeatMap(64, 1.0)
+
+    def forward(self, image: Tensor):
+
+        img_content = self.gh(image)
+        pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(img_content)
+        sparce_hm = self.heatmaper.forward(pred_measures.coord * 63)
+
+        return pred_measures, sparce_hm
 
 
 if __name__ == '__main__':
