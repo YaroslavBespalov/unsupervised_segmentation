@@ -1,6 +1,6 @@
 {
   "BCE content gan": 20.0,
-  "L1 restored": 80,
+  "L1 restored": 60,
   "L1 style gan": 50,
   "R_s": 80
 }
