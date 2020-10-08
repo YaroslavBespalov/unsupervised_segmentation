@@ -108,6 +108,7 @@ class GoldTuner:
         self.directions_tested = 0
         self.direction_score = 100
         self.best_ab: Optional[Tuple[Tensor, Tensor]] = None
+        self.repeat_coefs = False
 
     def update_coords(self):
         self.x1 = self.a + 0.382 * (self.b - self.a)
@@ -126,11 +127,19 @@ class GoldTuner:
         self.update_coords()
 
     def get_coef(self):
-        return self.queue[0][1]
+        c = self.coefs if self.repeat_coefs else self.queue[0][1]
+        # print("current test with coefs:", c)
+        return c
 
     def update(self, y: float):
 
         if not self.active:
+            return None
+
+        if self.repeat_coefs:
+            print("repeat with stable coefs")
+            self.repeat_coefs = False
+            self.direction()
             return None
 
         self.y["y" + self.queue[0][0]] = y
@@ -146,7 +155,8 @@ class GoldTuner:
                     self.best_ab = (self.a, self.b)
                     self.direction_score = score
 
-                self.direction()
+                # self.direction()
+                self.repeat_coefs = True
                 return None
 
             elif self.directions_tested >= 5:

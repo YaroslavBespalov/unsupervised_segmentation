@@ -239,7 +239,7 @@ def content_trainer_with_gan(cont_opt, tuner, heatmaper, encoder_HG, R_b, R_t, m
         fake1, _ = generator(img_content, noise1)
         cont_fake1 = encoder_HG(fake1.detach())
 
-        coefs = json.load(open("../parameters/content_loss.json"))
+        coefs = json.load(open("../parameters/content_loss_sup.json"))
 
         tuner.sum_losses([
             writable("Fake-content D", model.loss.generator_loss)(
@@ -331,7 +331,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
             content_trainer(real_img)
 
         if i % 100 == 0:
-            coefs = json.load(open("../parameters/content_loss.json"))
+            coefs = json.load(open("../parameters/content_loss_sup.json"))
             print(i, coefs)
             with torch.no_grad():
 

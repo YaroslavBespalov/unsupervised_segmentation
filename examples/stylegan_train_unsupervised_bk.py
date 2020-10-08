@@ -312,7 +312,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
             cont_fake1 = encoder_HG(fake1.detach())
             # cont_fake2 = encoder_HG(fake2)
             # TODO: add L1 to Sparse
-            coefs = json.load(open("../parameters/content_loss.json"))
+            coefs = json.load(open("../parameters/content_loss_sup.json"))
             tuner.sum_losses([
                 writable("Fake-content D", model.loss.generator_loss)(real=None, fake=[fake1, img_content.detach()]) * coefs["Fake-content D"], # 800
                 writable("Real-content D", model.loss.generator_loss)(real=None, fake=[real_img, img_content]) * coefs["Real-content D"],  # 5

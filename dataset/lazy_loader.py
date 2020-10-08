@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset, CelebaWithLandmarks
 from dataset.d300w import ThreeHundredW
 from dataset.MAFL import MAFLDataset
-from albumentations.pytorch.transforms import ToTensor as AlbToTensor
+from albumentations.pytorch.transforms import ToTensorV2 as AlbToTensor
 
 from parameters.path import Paths
 
@@ -162,7 +162,7 @@ class MAFL:
 
         self.loader_train_inf = sample_data(self.loader_train)
 
-        self.test_dataset = MAFLDataset(f"{Paths.default.data()}", split="train", target_type="landmarks")
+        self.test_dataset = MAFLDataset(f"{Paths.default.data()}", split="test", target_type="landmarks")
 
         self.test_loader = data.DataLoader(
             self.test_dataset,

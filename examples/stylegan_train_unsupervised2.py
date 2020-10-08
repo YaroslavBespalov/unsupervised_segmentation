@@ -9,7 +9,7 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
-from dataset.lazy_loader import LazyLoader, Celeba, W300DatasetLoader
+from dataset.lazy_loader import LazyLoader, Celeba, W300DatasetLoader, MAFL
 from dataset.toheatmap import heatmap_to_measure, ToHeatMap, sparse_heatmap, ToGaussHeatMap
 from modules.hg import HG_softmax2020
 from parameters.path import Paths
@@ -57,43 +57,47 @@ def handmadew1(m1,m2):
     with torch.no_grad():
         P = SOT(200, lambd).forward(m1, m2)
         M = PairwiseDistance()(m1.coord, m2.coord).sqrt()
-    return (M * P).sum(dim=(1,2)) / 2 # (2 * m1.coord.shape[1])
+        main_diag = (torch.diagonal(M, offset=0, dim1=1, dim2=2) * torch.diagonal(P, offset=0, dim1=1, dim2=2))
+    return ((M * P).sum(dim=(1,2)) + main_diag.sum(dim=1)) / 2 # (2 * m1.coord.shape[1])
 
 def liuboff(encoder: nn.Module):
     sum_loss = 0
-    for i, batch in enumerate(LazyLoader.w300().test_loader):
+    for i, batch in enumerate(LazyLoader.mafl().test_loader):
         data = batch['data'].to(device)
-        landmarks = batch["meta"]["keypts_normalized"].cuda()
+        landmarks = batch["meta"]["keypts_normalized"].cuda().type(dtype=torch.float32)
         landmarks[landmarks > 1] = 0.99999
         # content = heatmap_to_measure(encoder(data))[0]
         pred_measure = UniformMeasure2DFactory.from_heatmap(encoder(data))
         target = UniformMeasure2D01(torch.clamp(landmarks, max=1))
-        eye_dist = landmarks[:, 45] - landmarks[:, 36]
+        eye_dist = landmarks[:, 1] - landmarks[:, 0]
         eye_dist = eye_dist.pow(2).sum(dim=1).sqrt()
-        sum_loss += (handmadew1(pred_measure, target) / eye_dist).sum().item()
-    return sum_loss / len(LazyLoader.w300().test_dataset)
+        # w1_loss = (handmadew1(pred_measure, target) / eye_dist).sum().item()
+        # l1_loss = ((pred_measure.coord - target.coord).pow(2).sum(dim=2).sqrt().mean(dim=1) / eye_dist).sum().item()
+        # print(w1_loss, l1_loss)
+        sum_loss += ((pred_measure.coord - target.coord).pow(2).sum(dim=2).sqrt().mean(dim=1) / eye_dist).sum().item()
+    return sum_loss / len(LazyLoader.mafl().test_dataset)
 
 
-def verka(encoder: nn.Module):
-    res = []
-    for i, (image, lm) in enumerate(LazyLoader.celeba_test(64)):
-        content = encoder(image.cuda())
-        mes = UniformMeasure2D01(lm.cuda())
-        pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(content)
-        res.append(Samples_Loss(p=1)(mes, pred_measures).item() * image.shape[0])
-    return np.mean(res)/len(LazyLoader.celeba_test(1).dataset)
-
-
-def nadbka(encoder: nn.Module):
-    sum_loss = 0
-    for i, batch in enumerate(LazyLoader.w300().test_loader):
-        data = batch['data'].to(device)
-        landmarks = batch["meta"]["keypts_normalized"].cuda()
-        content = heatmap_to_measure(encoder(data))[0]
-        eye_dist = landmarks[:, 45] - landmarks[:, 36]
-        eye_dist = eye_dist.pow(2).sum(dim=1).sqrt()
-        sum_loss += ((content - landmarks).pow(2).sum(dim=2).sqrt().mean(dim=1) / eye_dist).sum().item()
-    return sum_loss / len(LazyLoader.w300().test_dataset)
+# def verka(encoder: nn.Module):
+#     res = []
+#     for i, (image, lm) in enumerate(LazyLoader.celeba_test(64)):
+#         content = encoder(image.cuda())
+#         mes = UniformMeasure2D01(lm.cuda())
+#         pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(content)
+#         res.append(Samples_Loss(p=1)(mes, pred_measures).item() * image.shape[0])
+#     return np.mean(res)/len(LazyLoader.celeba_test(1).dataset)
+#
+#
+# def nadbka(encoder: nn.Module):
+#     sum_loss = 0
+#     for i, batch in enumerate(LazyLoader.w300().test_loader):
+#         data = batch['data'].to(device)
+#         landmarks = batch["meta"]["keypts_normalized"].cuda()
+#         content = heatmap_to_measure(encoder(data))[0]
+#         eye_dist = landmarks[:, 45] - landmarks[:, 36]
+#         eye_dist = eye_dist.pow(2).sum(dim=1).sqrt()
+#         sum_loss += ((content - landmarks).pow(2).sum(dim=2).sqrt().mean(dim=1) / eye_dist).sum().item()
+#     return sum_loss / len(LazyLoader.w300().test_dataset)
 
 
 def requires_grad(model, flag=True):
@@ -239,6 +243,7 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
 
         noise = mixing_noise(batch_size, latent_size, 0.9, device)
         fake, _ = generator(trans_sparse_hm, noise, return_latents=False)
+
         # fake2, _ = generator(sparse_hm, noise, return_latents=True)
         model.disc_train([trans_real_img], [fake], trans_sparse_hm)
         # model.disc_train([real_img], [fake2], sparse_hm)
@@ -280,7 +285,7 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
 def train_content(cont_opt, R_b, R_t, real_img, heatmaper, g_transforms):
     requires_grad(encoder_HG, True)
 
-    coefs = json.load(open("../parameters/content_loss.json"))
+    coefs = json.load(open("../parameters/content_loss_sup.json"))
     # pred_measures, sparse_hm = encoder_HG(real_img)
     content = encoder_HG(real_img)
     pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(content)
@@ -318,15 +323,15 @@ def content_trainer_with_gan(cont_opt, tuner, heatmaper, encoder_HG, R_b, R_t, m
         fake1, _ = generator(trans_content, noise1)
         trans_fake_content = encoder_HG(fake1.detach())
 
-        coefs = json.load(open("../parameters/content_loss.json"))
+        coefs = json.load(open("../parameters/content_loss_sup.json"))
 
         tuner.sum_losses([
-            # writable("Fake-content D", model.loss.generator_loss)(
-            #     real=None,
-            #     fake=[fake1, img_content]) * coefs["Fake-content D"],  # 50 000
-            writable("Real-content D", model.loss.generator_loss)(
+            writable("Fake-content D", model.loss.generator_loss)(
                 real=None,
-                fake=[real_img, img_content]) * coefs["Real-content D"],  # 3000
+                fake=[fake1, img_content.detach()]) * coefs["Fake-content D"],  # 50 000
+            writable("Real-content D", model.loss.discriminator_loss_as_is)(
+                [real_img, img_content],
+                [fake1.detach(), img_content]) * coefs["Real-content D"],  # 3000
             writable("R_b", R_b.__call__)(real_img, pred_measures) * coefs["R_b"],  # 3000
             writable("Sparse", hm_loss_bes_xy)(img_content, sparse_hm) * coefs["Sparse"],  # 1.5
             writable("R_t", R_t.__call__)(real_img, sparse_hm) * coefs["R_t"],  # 3
@@ -346,12 +351,12 @@ def content_trainer_supervised(cont_opt, encoder_HG, loader):
     def do_train():
         requires_grad(encoder_HG, True)
         w300_batch = next(loader)
-        w300_image = w300_batch['data'].to(device)
+        w300_image = w300_batch['data'].to(device).type(torch.float32)
         w300_mes = ProbabilityMeasureFabric(256).from_coord_tensor(w300_batch["meta"]["keypts_normalized"]).cuda()
-        w300_target_hm = heatmaper.forward(w300_mes.probability, w300_mes.coord * 63).detach()
+        w300_target_hm = heatmaper.forward(w300_mes.probability.type(torch.float32), w300_mes.coord.type(torch.float32) * 63).detach()
         content300 = encoder_HG(w300_image)
 
-        coefs = json.load(open("../parameters/content_loss.json"))
+        coefs = json.load(open("../parameters/content_loss_sup.json"))
 
         writable("W300 Loss", hm_svoego_roda_loss)(content300, w300_target_hm).__mul__(coefs["borj4_w300"]).minimize_step(cont_opt)
     return do_train
@@ -361,17 +366,17 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
     latent_size = 512
     batch_size = 12
     sample_z = torch.randn(8, latent_size, device=device)
+    MAFL.batch_size = batch_size
+    MAFL.test_batch_size = 64
     Celeba.batch_size = batch_size
-    W300DatasetLoader.batch_size = batch_size
-    W300DatasetLoader.test_batch_size = 64
 
-    test_img = next(LazyLoader.celeba().loader)[:8].cuda()
+    test_img = next(LazyLoader.mafl().loader_train_inf)["data"][:8].cuda()
 
     loss_st: StyleGANLoss = StyleGANLoss(discriminator)
-    model = CondStyleGanModel(generator, loss_st, (0.001/4, 0.0015/4))
+    model = CondStyleGanModel(generator, loss_st, (0.001, 0.0015))
 
     style_opt = optim.Adam(style_encoder.parameters(), lr=5e-4, betas=(0.9, 0.99))
-    cont_opt = optim.Adam(encoder_HG.parameters(), lr=1e-5, betas=(0.5, 0.97))
+    cont_opt = optim.Adam(encoder_HG.parameters(), lr=2e-5, betas=(0.5, 0.97))
 
     g_transforms: albumentations.DualTransform = albumentations.Compose([
         ToNumpy(),
@@ -396,11 +401,10 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
         L1("R_s")(ltnt, style_encoder(trans_dict['image']))
     )
 
-    barycenter: UniformMeasure2D01 = UniformMeasure2DFactory.load(f"{Paths.default.models()}/face_barycenter_68").cuda().batch_repeat(batch_size)
+    barycenter: UniformMeasure2D01 = UniformMeasure2DFactory.load(f"{Paths.default.models()}/face_barycenter_5").cuda().batch_repeat(batch_size)
 
     R_b = BarycenterRegularizer.__call__(barycenter, 1.0, 2.0, 4.0)
-
-    tuner = GoldTuner([2.3906, 1.0962, 1.2462, 1.7386, 0.5514, 1.2390], device=device, rule_eps=0.01, radius=0.2, active=True)
+    tuner = GoldTuner([0.37, 1.55, 0.9393, 0.1264, 1.7687, 0.8648, 1.8609], device=device, rule_eps=0.01/2, radius=0.1, active=True)
 
     heatmaper = ToGaussHeatMap(64, 1.0)
     sparse_bc = heatmaper.forward(barycenter.coord * 63)
@@ -411,28 +415,28 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
 
     trainer_gan = gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style_opt, heatmaper, g_transforms)
     content_trainer = content_trainer_with_gan(cont_opt, tuner, heatmaper, encoder_HG, R_b, R_t, model, generator, g_transforms)
-    # supervise_trainer = content_trainer_supervised(cont_opt, encoder_HG, LazyLoader.w300().loader_train_inf)
+    supervise_trainer = content_trainer_supervised(cont_opt, encoder_HG, LazyLoader.mafl().loader_train_inf)
 
     for i in range(100000):
         counter.update(i)
 
         requires_grad(encoder_HG, False)  # REMOVE BEFORE TRAINING
-        real_img = next(LazyLoader.celeba().loader).to(device)
-        # if i % 5 == 0 else next(LazyLoader.w300().loader_train_inf)['data'].to(device)
+        real_img = next(LazyLoader.mafl().loader_train_inf)["data"].to(device) \
+            if i % 5 == 0 else next(LazyLoader.celeba().loader).to(device)
 
         img_content = encoder_HG(real_img)
         pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(img_content)
         sparse_hm = heatmaper.forward(pred_measures.coord * 63).detach()
         trainer_gan(i, real_img, pred_measures.detach(), sparse_hm.detach(), apply_g=False)
-        # supervise_trainer()
-        # train_content(cont_opt, R_b, R_t, real_img, heatmaper, g_transforms)
+        supervise_trainer()
 
-        if i % 3 == 0:
+        if i % 4 == 0:
+            # real_img = next(LazyLoader.mafl().loader_train_inf)["data"].to(device)
             trainer_gan(i, real_img, pred_measures.detach(), sparse_hm.detach(), apply_g=True)
             content_trainer(real_img)
 
         if i % 100 == 0:
-            coefs = json.load(open("../parameters/content_loss.json"))
+            coefs = json.load(open("../parameters/content_loss_sup.json"))
             print(i, coefs)
             with torch.no_grad():
 
@@ -464,7 +468,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
                 content_test_256 = (content_test_256 - content_test_256.min()) / content_test_256.max()
                 send_images_to_tensorboard(writer, content_test_256, "HM", i, normalize=False, range=(0, 1))
 
-        if i % 50 == 0 and i > 0:
+        if i % 50 == 0 and i >= 0:
             test_loss = liuboff(encoder_HG)
             # test_loss = nadbka(encoder_HG)
             tuner.update(test_loss)
@@ -478,7 +482,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
                     'c': encoder_HG.module.state_dict(),
                     "s": style_encoder.state_dict()
                 },
-                f'{Paths.default.models()}/stylegan2_new_{str(i + starting_model_number).zfill(6)}.pt',
+                f'{Paths.default.models()}/stylegan2_MAFL_{str(i + starting_model_number).zfill(6)}.pt',
             )
 
 
@@ -486,7 +490,7 @@ if __name__ == '__main__':
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
     torch.cuda.set_device(device)
-    encoder_HG = HG_softmax2020(num_classes=68, heatmap_size=64)
+    encoder_HG = HG_softmax2020(num_classes=5, heatmap_size=64)
     # encoder_HG.load_state_dict(torch.load("/home/ibespalov/pomoika/hg2_e29.pt", map_location="cpu"))
 
     print("HG")
@@ -496,18 +500,18 @@ if __name__ == '__main__':
     size = 256
 
     generator = CondGen3(Generator(
-        size, latent, n_mlp, channel_multiplier=1
-    ))
+        size, latent, n_mlp, channel_multiplier=1,
+    ), heatmap_channels=5)
 
     discriminator = CondDisc3(
-        size, channel_multiplier=1
+        size, heatmap_channels=5, channel_multiplier=1
     )
 
     style_encoder = StyleEncoder(style_dim=latent)
 
-    starting_model_number = 170000
+    starting_model_number = 190000 #170000
     weights = torch.load(
-        f'{Paths.default.models()}/stylegan2_new_{str(starting_model_number).zfill(6)}.pt',
+        f'{Paths.default.models()}/stylegan2_MAFL_{str(starting_model_number).zfill(6)}.pt',
         # f'{Paths.default.models()}/zhores/stylegan2_w300_{str(starting_model_number).zfill(6)}.pt',
         map_location="cpu"
     )

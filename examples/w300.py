@@ -152,7 +152,7 @@ for epoch in range(130):
         if i % 5 == 0:
             real_img = next(LazyLoader.celeba().loader).to(device)
             content = encoder_HG(data)
-            coefs = json.load(open("../parameters/content_loss.json"))
+            coefs = json.load(open("../parameters/content_loss_sup.json"))
             R_t(real_img, content).__mul__(coefs["R_t"]).minimize_step(cont_opt)
 
         # writer.add_scalar("L1", lossyash.item(), i + epoch*len(LazyLoader.w300().loader_train))

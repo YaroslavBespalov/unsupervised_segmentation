@@ -57,7 +57,8 @@ def handmadew1(m1,m2):
     with torch.no_grad():
         P = SOT(200, lambd).forward(m1, m2)
         M = PairwiseDistance()(m1.coord, m2.coord).sqrt()
-    return (M * P).sum(dim=(1,2)) / 2 # (2 * m1.coord.shape[1])
+        main_diag = (torch.diagonal(M, offset=0, dim1=1, dim2=2) * torch.diagonal(P, offset=0, dim1=1, dim2=2))
+    return ((M * P).sum(dim=(1,2)) + main_diag.sum(dim=1)) / 2 # (2 * m1.coord.shape[1])
 
 def liuboff(encoder: nn.Module):
     sum_loss = 0
@@ -139,17 +140,17 @@ def stariy_hm_loss(pred, target, coef=1.0):
         # (pred - target).abs().mean() * 0.1 * coef
     )
 
-def hm_svoego_roda_loss(pred, target):
-
-    pred_xy, _ = heatmap_to_measure(pred)
-    with torch.no_grad():
-        t_xy, _ = heatmap_to_measure(target)
-
-    return Loss(
-        nn.BCELoss()(pred, target) +
-        nn.MSELoss()(pred_xy, t_xy) * 0.001
-        # (pred - target).abs().mean() * 0.1
-    )
+# def hm_svoego_roda_loss(pred, target):
+#
+#     pred_xy, _ = heatmap_to_measure(pred)
+#     with torch.no_grad():
+#         t_xy, _ = heatmap_to_measure(target)
+#
+#     return Loss(
+#         nn.BCELoss()(pred, target) +
+#         nn.MSELoss()(pred_xy, t_xy) * 0.001
+#         # (pred - target).abs().mean() * 0.1
+#     )
 
 def hm_loss_bes_xy(pred, target):
 
@@ -280,7 +281,7 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
 def train_content(cont_opt, R_b, R_t, real_img, heatmaper, g_transforms):
     requires_grad(encoder_HG, True)
 
-    coefs = json.load(open("../parameters/content_loss.json"))
+    coefs = json.load(open("../parameters/content_loss_sup.json"))
     # pred_measures, sparse_hm = encoder_HG(real_img)
     content = encoder_HG(real_img)
     pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(content)
@@ -318,15 +319,15 @@ def content_trainer_with_gan(cont_opt, tuner, heatmaper, encoder_HG, R_b, R_t, m
         fake1, _ = generator(trans_content, noise1)
         trans_fake_content = encoder_HG(fake1.detach())
 
-        coefs = json.load(open("../parameters/content_loss.json"))
+        coefs = json.load(open("../parameters/content_loss_sup.json"))
 
         tuner.sum_losses([
-            # writable("Fake-content D", model.loss.generator_loss)(
-            #     real=None,
-            #     fake=[fake1, img_content]) * coefs["Fake-content D"],  # 50 000
-            writable("Real-content D", model.loss.generator_loss)(
+            writable("Fake-content D", model.loss.generator_loss)(
                 real=None,
-                fake=[real_img, img_content]) * coefs["Real-content D"],  # 3000
+                fake=[fake1, img_content.detach()]) * coefs["Fake-content D"],  # 50 000
+            writable("Real-content D", model.loss.discriminator_loss_as_is)(
+                [real_img, img_content],
+                [fake1.detach(), img_content]) * coefs["Real-content D"],  # 3000
             writable("R_b", R_b.__call__)(real_img, pred_measures) * coefs["R_b"],  # 3000
             writable("Sparse", hm_loss_bes_xy)(img_content, sparse_hm) * coefs["Sparse"],  # 1.5
             writable("R_t", R_t.__call__)(real_img, sparse_hm) * coefs["R_t"],  # 3
@@ -351,9 +352,9 @@ def content_trainer_supervised(cont_opt, encoder_HG, loader):
         w300_target_hm = heatmaper.forward(w300_mes.probability, w300_mes.coord * 63).detach()
         content300 = encoder_HG(w300_image)
 
-        coefs = json.load(open("../parameters/content_loss.json"))
+        coefs = json.load(open("../parameters/content_loss_sup.json"))
 
-        writable("W300 Loss", hm_svoego_roda_loss)(content300, w300_target_hm).__mul__(coefs["borj4_w300"]).minimize_step(cont_opt)
+        writable("W300 Loss", stariy_hm_loss)(content300, w300_target_hm).__mul__(coefs["borj4_w300"]).minimize_step(cont_opt)
     return do_train
 
 
@@ -365,13 +366,14 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
     W300DatasetLoader.batch_size = batch_size
     W300DatasetLoader.test_batch_size = 64
 
+    # test_img = next(LazyLoader.w300().test_loader_inf)["data"][:8].cuda()
     test_img = next(LazyLoader.celeba().loader)[:8].cuda()
 
     loss_st: StyleGANLoss = StyleGANLoss(discriminator)
-    model = CondStyleGanModel(generator, loss_st, (0.001, 0.0015))
+    model = CondStyleGanModel(generator, loss_st, (0.001/2, 0.0015/2))
 
     style_opt = optim.Adam(style_encoder.parameters(), lr=5e-4, betas=(0.9, 0.99))
-    cont_opt = optim.Adam(encoder_HG.parameters(), lr=1e-5, betas=(0.5, 0.97))
+    cont_opt = optim.Adam(encoder_HG.parameters(), lr=3e-5, betas=(0.5, 0.97))
 
     g_transforms: albumentations.DualTransform = albumentations.Compose([
         ToNumpy(),
@@ -400,7 +402,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
 
     R_b = BarycenterRegularizer.__call__(barycenter, 1.0, 2.0, 4.0)
 
-    tuner = GoldTuner([2.3906, 1.0962, 1.2462, 1.7386, 0.5514, 1.2390], device=device, rule_eps=0.01, radius=0.2, active=True)
+    tuner = GoldTuner([0.6231, 2.2359, 0.3911, 1.2510, 2.0677, 0.6509, 1.2927], device=device, rule_eps=0.001, radius=0.3, active=True)
 
     heatmaper = ToGaussHeatMap(64, 1.0)
     sparse_bc = heatmaper.forward(barycenter.coord * 63)
@@ -424,15 +426,15 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
         pred_measures: UniformMeasure2D01 = UniformMeasure2DFactory.from_heatmap(img_content)
         sparse_hm = heatmaper.forward(pred_measures.coord * 63).detach()
         trainer_gan(i, real_img, pred_measures.detach(), sparse_hm.detach(), apply_g=False)
-        # supervise_trainer()
         # train_content(cont_opt, R_b, R_t, real_img, heatmaper, g_transforms)
+        # supervise_trainer()
 
-        if i % 3 == 0:
+        if i % 4 == 0:
             trainer_gan(i, real_img, pred_measures.detach(), sparse_hm.detach(), apply_g=True)
             content_trainer(real_img)
 
         if i % 100 == 0:
-            coefs = json.load(open("../parameters/content_loss.json"))
+            coefs = json.load(open("../parameters/content_loss_sup.json"))
             print(i, coefs)
             with torch.no_grad():
 
@@ -464,7 +466,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
                 content_test_256 = (content_test_256 - content_test_256.min()) / content_test_256.max()
                 send_images_to_tensorboard(writer, content_test_256, "HM", i, normalize=False, range=(0, 1))
 
-        if i % 50 == 0 and i > 0:
+        if i % 50 == 0 and i >= 0:
             test_loss = liuboff(encoder_HG)
             # test_loss = nadbka(encoder_HG)
             tuner.update(test_loss)
@@ -497,10 +499,10 @@ if __name__ == '__main__':
 
     generator = CondGen3(Generator(
         size, latent, n_mlp, channel_multiplier=1
-    ))
+    ), heatmap_channels=68)
 
     discriminator = CondDisc3(
-        size, channel_multiplier=1
+        size, channel_multiplier=1, heatmap_channels=68
     )
 
     style_encoder = StyleEncoder(style_dim=latent)
@@ -508,7 +510,7 @@ if __name__ == '__main__':
     starting_model_number = 170000
     weights = torch.load(
         f'{Paths.default.models()}/stylegan2_new_{str(starting_model_number).zfill(6)}.pt',
-        # f'{Paths.default.models()}/zhores/stylegan2_w300_{str(starting_model_number).zfill(6)}.pt',
+        # f'{Paths.default.models()}/stylegan2_w300_{str(starting_model_number).zfill(6)}.pt',
         map_location="cpu"
     )
 

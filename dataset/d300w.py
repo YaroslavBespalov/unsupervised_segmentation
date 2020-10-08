@@ -1,6 +1,7 @@
 import random
 
 import albumentations
+from albumentations.pytorch.transforms import ToTensorV2
 import torch
 from torch import nn, Tensor
 import numpy as np
@@ -13,6 +14,7 @@ from scipy.io import loadmat
 from torchvision import transforms
 import torchvision.transforms.functional as TF
 from torch.utils.data.dataset import Dataset
+
 
 
 
@@ -35,7 +37,7 @@ def center_by_face(image: torch.Tensor, landmarks: torch.Tensor):
     transforms = albumentations.Compose([
         albumentations.Crop(x_min=0, y_min=0, x_max=W, y_max=H09),
         albumentations.Resize(rh, rw),
-        albumentations.RandomCrop(256, 256),
+        albumentations.CenterCrop(256, 256),
         # albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
     data_dict = transforms(image=image, keypoints=[keypoints_landmarks])
@@ -174,7 +176,7 @@ class ThreeHundredW(Dataset):
         self.transforms = albumentations.Compose([
             albumentations.Resize(self.imwidth, self.imwidth),
             albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-            albumentations.ToTensorV2()
+            ToTensorV2()
         ])
 
     def __len__(self):
