@@ -16,7 +16,7 @@ from dataset.d300w import ThreeHundredW
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 from loss.tuner import CoefTuner, GoldTuner
 from dataset.lazy_loader import LazyLoader, CelebaWithKeyPoints, Celeba
-from gan.loss.gan_loss import StyleGANLoss
+from gan.loss.base import StyleGANLoss
 from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
 from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
@@ -174,7 +174,7 @@ def train(generator, discriminator, encoder, style_encoder, device, starting_mod
         noise = mixing_noise(batch, latent_size, 0.9, device)
         fake, _ = generator(img_content, noise)
 
-        model.disc_train([real_img], [fake.detach()], img_content)
+        model.discriminator_train([real_img], [fake.detach()], img_content)
 
         writable("Generator loss", model.generator_loss)([real_img], [fake], [], img_content)\
             .minimize_step(model.optimizer.opt_min)

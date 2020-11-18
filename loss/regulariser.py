@@ -4,12 +4,12 @@ import torch
 import torch.nn as nn
 import numpy as np
 from albumentations import DualTransform
-# from conda.models.dist import Dist
+# from conda.nn.dist import Dist
 from torch import Tensor
 
 from dataset.probmeasure import ProbabilityMeasure
+from gan.loss.loss_base import Loss
 from loss.losses import Samples_Loss
-from gan.loss_base import Loss
 from modules.linear_ot import LinearTransformOT, SOT, PairwiseDistance
 
 

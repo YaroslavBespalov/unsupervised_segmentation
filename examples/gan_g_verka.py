@@ -16,7 +16,7 @@ from parameters.path import Paths
 
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 from loss.tuner import CoefTuner, GoldTuner
-from gan.loss.gan_loss import StyleGANLoss
+from gan.loss.base import StyleGANLoss
 from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
 from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
@@ -44,7 +44,7 @@ from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric, Un
     UniformMeasure2D01
 from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, CondGen2, CondGen3, CondDisc3, \
     CondGenDecode
-from gan.loss_base import Loss
+from gan.loss.loss_base import Loss
 from metrics.writers import ItersCounter, send_images_to_tensorboard
 from models.common import View
 from models.munit.enc_dec import MunitEncoder, StyleEncoder
@@ -174,7 +174,7 @@ def gan_trainer(model, generator, decoder, encoder_HG, style_encoder, R_s, style
         noise = mixing_noise(batch_size, latent_size, 0.9, device)
         fake, _ = generator(trans_sparse_hm, noise, return_latents=False)
 
-        model.disc_train([trans_real_img], [fake], trans_sparse_hm)
+        model.discriminator_train([trans_real_img], [fake], trans_sparse_hm)
 
         writable("Generator loss", model.generator_loss)([trans_real_img], [fake], [], trans_sparse_hm) \
             .minimize_step(model.optimizer.opt_min)

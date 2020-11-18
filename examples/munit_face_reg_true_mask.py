@@ -38,7 +38,7 @@ from gans_pytorch.gan.noise.normal import NormalNoise
 from gans_pytorch.gan.gan_model import stylegan2
 from gans_pytorch.optim.min_max import MinMaxParameters, MinMaxOptimizer
 from gans_pytorch.stylegan2.model import ConvLayer, EqualLinear, PixelNorm, Generator, Discriminator
-from gan.loss.gan_loss import GANLossObject, StyleGANLoss
+from gan.loss.base import GANLossObject, StyleGANLoss
 from loss.losses import Samples_Loss
 from loss.regulariser import BarycenterRegularizer, DualTransformRegularizer
 from loss_base import Loss

@@ -34,23 +34,28 @@ from loss.losses import Samples_Loss, WeightedSamplesLoss
 from modules.hg import HG_softmax2020
 from parameters.path import Paths
 
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+print(device)
+torch.cuda.set_device(device)
+
 image_size = 256
-batch_size = 32
+batch_size = 64
 padding = 68
 MAFL.batch_size = batch_size
 W300DatasetLoader.batch_size = batch_size
 
+NC = 256
 
 bc_net = nn.Sequential(
-    nn.Linear(batch_size, 64),
+    nn.Linear(batch_size, NC),
     nn.ReLU(inplace=True),
-    nn.Linear(64, 64),
+    nn.Linear(NC, NC),
     nn.ReLU(inplace=True),
-    nn.Linear(64, 64),
+    nn.Linear(NC, NC),
     nn.ReLU(inplace=True),
-    nn.Linear(64, 64),
+    nn.Linear(NC, NC),
     nn.ReLU(inplace=True),
-    nn.Linear(64, padding * 2),
+    nn.Linear(NC, padding * 2),
     nn.Sigmoid()
 ).cuda()
 
@@ -104,21 +109,29 @@ def compute_wbc(measures: ProbabilityMeasure, weights: Tensor, opt_iters: int) -
     return barycenter, lll
 
 
-mafl_dataloader = LazyLoader.w300().loader_train_inf
-mes = UniformMeasure2D01(next(mafl_dataloader)['meta']['keypts_normalized'].type(torch.float32)).cuda()
+# mafl_dataloader = LazyLoader.w300().loader_train_inf
+# mes = UniformMeasure2D01(next(mafl_dataloader)['meta']['keypts_normalized'].type(torch.float32)).cuda()
+mes = UniformMeasure2D01(next(iter(LazyLoader.celeba_test(batch_size)))[1]).cuda()
 
 
 for j in range(10000):
     weights = Dirichlet(torch.ones(batch_size)/10).sample().cuda()
-    barycenter, lll = compute_wbc(mes, weights, min(400, j + 10))
+    barycenter, lll = compute_wbc(mes, weights, min(200, j + 10))
 
-    if j % 100 == 0:
+    if j % 50 == 0:
        print(j)
        sced.step(lll)
 
-    if j % 100 == 0:
+    if j % 50 == 0:
         plt.imshow(barycenter.toImage(200)[0][0].detach().cpu().numpy())
         plt.show()
+
+    starting_model_number = 0
+    if j % 1000 == 0 and j > 0:
+        torch.save(
+            bc_net.state_dict(),
+            f'{Paths.default.models()}/bc_model256_64_{str(j + starting_model_number).zfill(6)}.pt',
+        )
 
 # plt.imshow(barycenter.toImage(200)[0][0].detach().cpu().numpy())
 # plt.show()

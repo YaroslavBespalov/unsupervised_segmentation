@@ -8,7 +8,8 @@ from torch import Tensor
 from typing import List
 
 from dataset.probmeasure import UniformMeasure2D01, UniformMeasure2DFactory
-from dataset.toheatmap import ToHeatMap, heatmap_to_measure, ToGaussHeatMap
+from dataset.toheatmap import ToHeatMap, heatmap_to_measure, ToGaussHeatMap, HeatMapToGaussHeatMap, CoordToGaussSkeleton
+from models.common import View
 
 
 def get_preds(scores):
@@ -104,14 +105,16 @@ class Bottleneck(nn.Module):
     def __init__(self, inplanes, planes, stride=1, downsample=None):
         super(Bottleneck, self).__init__()
 
-        self.bn1 = nn.BatchNorm2d(inplanes)
+        NormClass = nn.BatchNorm2d
+
+        self.bn1 = NormClass(inplanes)
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=True)
-        self.bn2 = nn.BatchNorm2d(planes)
+        self.bn2 = NormClass(planes)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
                                padding=1, bias=True)
-        self.bn3 = nn.BatchNorm2d(planes)
+        self.bn3 = NormClass(planes)
         self.conv3 = nn.Conv2d(planes, planes * 2, kernel_size=1, bias=True)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
         self.downsample = downsample
         self.stride = stride
 
@@ -191,7 +194,7 @@ class HourglassNet(nn.Module):
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=True)
         self.bn1 = nn.BatchNorm2d(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(0.2, inplace=True)
         self.layer1 = self._make_residual(block, self.inplanes, 1)
         self.layer2 = self._make_residual(block, self.inplanes, 1)
         self.layer3 = self._make_residual(block, self.num_feats, 1)
@@ -303,19 +306,105 @@ class HG_softmax2020(nn.Module):
         self.model = hg2(num_classes=self.num_classes, num_blocks=1)
 
     def forward(self, image: Tensor):
+        B, C, D, D = image.shape
         heatmaps: List[Tensor] = self.model.forward(image)
+        out = heatmaps[-1]
 
-        return heatmaps[-1]
+        return {
+            "out": out,
+            "softmax": self.postproc(out)
+        }
+
+    def postproc(self, hm: Tensor):
+
+        B = hm.shape[0]
+
+        return hm.clamp(-100, 30)\
+                   .view(B, self.num_classes, -1)\
+                   .softmax(dim=2)\
+                   .view(B, self.num_classes, self.heatmap_size, self.heatmap_size) / self.num_classes
+
 
     def get_heatmaps(self, image: Tensor):
         B, C, D, D = image.shape
-
-        # print(self.forward(image)[0][0].exp().sum())
-
         return self.forward(image).clamp(-100, 30)\
                    .view(B, self.num_classes, -1)\
                    .softmax(dim=2)\
                    .view(B, self.num_classes, self.heatmap_size, self.heatmap_size) / self.num_classes
+
+    def return_coords(self, image: Tensor):
+        heatmaps = self.forward(image)
+        coords, p = heatmap_to_measure(heatmaps)
+        return coords
+
+
+class HG_skeleton(nn.Module):
+
+    def __init__(self, skeletoner, num_classes=68, heatmap_size=64):
+        super().__init__()
+        self.num_classes = num_classes
+        self.heatmap_size = heatmap_size
+        self.model = hg2(num_classes=self.num_classes, num_blocks=1)
+
+        NormClass = nn.BatchNorm2d
+
+        self.hm_to_coord = nn.Sequential(
+            nn.Conv2d(num_classes, num_classes, 4, 2, 1),
+            NormClass(num_classes),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(num_classes, num_classes, 4, 2, 1),
+            NormClass(num_classes),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(num_classes, num_classes, 4, 2, 1),
+            NormClass(num_classes),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(num_classes, num_classes, 4, 2, 1),
+            NormClass(num_classes),
+            nn.LeakyReLU(0.2, inplace=True),
+            View(num_classes * 4 * 4),
+            nn.Linear(num_classes * 4 * 4, num_classes * 2),
+            nn.Sigmoid(),
+            View(num_classes, 2)
+        )
+
+        self.skeletoner = skeletoner
+
+    def forward(self, image: Tensor):
+        B, C, D, D = image.shape
+        heatmaps: List[Tensor] = self.model.forward(image)
+        out = heatmaps[-1]
+
+        coords = self.hm_to_coord(out)
+        sk = self.skeletoner.forward(coords).sum(dim=1, keepdim=True)
+
+        assert coords.max().item() is not None
+        assert coords.max().item() < 2
+
+        return {
+            "coords": coords,
+            "skeleton": sk
+        }
+
+
+class HG_squeremax2020(nn.Module):
+
+    def __init__(self, num_classes=68, heatmap_size=64):
+        super().__init__()
+        self.num_classes = num_classes
+        self.heatmap_size = heatmap_size
+        self.model = hg2(num_classes=self.num_classes, num_blocks=1)
+
+    def forward(self, image: Tensor):
+        B, C, D, D = image.shape
+        heatmaps: List[Tensor] = self.model.forward(image)
+        squere_value = heatmaps[-1].relu().pow(2)
+        sup = ((squere_value/squere_value.sum(dim=(2,3), keepdim=True).detach()) / self.num_classes)\
+                .view(B, self.num_classes, self.heatmap_size, self.heatmap_size)
+
+        return {
+            "out": heatmaps[-1],
+            "softmax":  sup
+        }
 
     def return_coords(self, image: Tensor):
         heatmaps = self.forward(image)
@@ -337,6 +426,21 @@ class GHSparse(nn.Module):
         sparce_hm = self.heatmaper.forward(pred_measures.coord * 63)
 
         return pred_measures, sparce_hm
+
+
+class InternalHG(nn.Module):
+
+    def __init__(self, hg_model: HG_softmax2020):
+        super().__init__()
+
+        self.model = hg_model
+
+    def forward(self, image: Tensor):
+        B, C, D, D = image.shape
+        heatmaps: List[Tensor] = self.model.model.forward(image)
+
+        return heatmaps[-1], self.model.postproc(heatmaps[-1])
+
 
 
 if __name__ == '__main__':

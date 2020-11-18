@@ -1,5 +1,5 @@
 import time
-from typing import List, Tuple, Type
+from typing import List, Tuple, Type, Optional, Callable, Any
 import torch
 from PIL import Image
 from torch import nn, Tensor
@@ -7,8 +7,9 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 import numpy as np
 
-from gan.loss_base import Loss
+from gan.loss.loss_base import Loss
 from optim.min_max import MinMaxLoss
+from parameters.path import Paths
 
 
 def tensorboard_scatter(tensor : Tensor, writer: SummaryWriter, step: int):
@@ -85,6 +86,42 @@ def send_to_tensorboard(*name2type: str, counter: ItersCounter, skip: int = 1, w
         return decorated
 
     return decorator
+
+
+class WR:
+
+    counter = ItersCounter()
+    writer = SummaryWriter(f"{Paths.default.board()}/stylegan{int(time.time())}")
+    print(f"{Paths.default.board()}/stylegan{int(time.time())}")
+    l1_loss = nn.L1Loss()
+
+    @staticmethod
+    def L1(name: Optional[str]) -> Callable[[Tensor, Tensor], Loss]:
+
+        if name:
+            WR.counter.active[name] = True
+
+        def compute(t1: Tensor, t2: Tensor):
+            loss = WR.l1_loss(t1, t2)
+            if name:
+                if WR.counter.get_iter(name) % 10 == 0:
+                    WR.writer.add_scalar(name, loss, WR.counter.get_iter(name))
+            return Loss(loss)
+
+        return compute
+
+    @staticmethod
+    def writable(name: str, f: Callable[[Any], Loss]):
+        WR.counter.active[name] = True
+
+        def decorated(*args, **kwargs) -> Loss:
+            loss = f(*args, **kwargs)
+            iter = WR.counter.get_iter(name)
+            if iter % 10 == 0:
+                WR.writer.add_scalar(name, loss.item(), iter)
+            return loss
+
+        return decorated
 
 
 

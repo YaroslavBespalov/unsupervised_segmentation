@@ -104,9 +104,14 @@ class UniformMeasure2D01(ProbabilityMeasure):
 
     def __init__(self, coord: Tensor):
         B, N, D = coord.shape
+
+        if coord.max() > 1.001:
+            print(coord.max())
+
         assert D == 2
-        assert coord.max() < 1 + 1e-8
+        assert coord.max() <= 1.001
         assert coord.min() > - 1e-8
+
         prob = torch.ones(B, N, device=coord.device, dtype=torch.float32) / N
         super().__init__(prob, coord)
 

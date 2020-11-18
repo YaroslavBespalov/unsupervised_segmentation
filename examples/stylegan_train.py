@@ -11,7 +11,7 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 from loss.tuner import CoefTuner, GoldTuner
-from gan.loss.gan_loss import StyleGANLoss
+from gan.loss.base import StyleGANLoss
 from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
 from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
@@ -300,7 +300,7 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder, st
         img_content_variable = img_content.detach().requires_grad_(True)
         fake, fake_latent = generator(img_content_variable, noise, return_latents=True)
 
-        model.disc_train([real_img], [fake], img_content)
+        model.discriminator_train([real_img], [fake], img_content)
 
         # fake_detach = fake.detach()
         fake_latent_test = fake_latent[:, [0, 13], :].detach()
@@ -407,7 +407,7 @@ def train(args, loader, generator, discriminator, device, cont_style_encoder, st
             #             'd': discriminator.state_dict(),
             #             'enc': cont_style_encoder.state_dict(),
             #         },
-            #         f'{Paths.default.models()}/stylegan2_igor_3.pt',
+            #         f'{Paths.default.nn()}/stylegan2_igor_3.pt',
             #     )
 
         if i % 10000 == 0 and i > 0:

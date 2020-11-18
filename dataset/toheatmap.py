@@ -1,8 +1,12 @@
 from typing import List
 import torch
+from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, DBSCAN, SpectralClustering
+from sklearn.neighbors import kneighbors_graph
 from torch import Tensor
 import numpy as np
+from torch_cluster import knn_graph, graclus_cluster
 from modules.ToImage import ToImage2D
+from parameters.path import Paths
 
 
 class ToHeatMap:
@@ -61,19 +65,61 @@ class ToGaussHeatMap:
     def forward(self, coord: Tensor):
         B, N, D = coord.shape
 
+        assert coord.max() < 1.0001
+        coord = coord * (self.size - 1)
+
         xy = make_coords(B, self.size, self.size, coord.device)\
             .view(B, 1, 2, self.size, self.size).repeat(1, N, 1, 1, 1)
 
         xy_dist = -(xy - coord.view(B, N, 2, 1, 1)).pow(2).sum(dim=2) / (self.sigma**2)
-        xy_dist = xy_dist.exp()
-        norm = xy_dist.sum(dim=[1, 2, 3], keepdim=True)
+        xy_dist = xy_dist.clamp(-30, 30)
 
-        return xy_dist / norm
+        xy_dist = xy_dist.exp()
+
+        return xy_dist
+
+
+class ToParabola:
+
+    def __init__(self, size, sigma):
+        self.size = size
+        self.sigma = sigma
+
+    def forward(self, coord: Tensor):
+        B, N, D = coord.shape
+
+        xy = make_coords(B, self.size, self.size, coord.device)\
+            .view(B, 1, 2, self.size, self.size).repeat(1, N, 1, 1, 1)
+
+        xy_dist = -(xy - coord.view(B, N, 2, 1, 1)).abs().sum(dim=2) / (self.sigma**2)
+
+        # norm = xy_dist.max(dim=[2, 3], keepdim=True)
+
+        return (14 + xy_dist).relu() - 7
+
+
+class HeatMapToGaussHeatMap(ToGaussHeatMap):
+
+    def forward(self, hm: Tensor):
+        coords, p = heatmap_to_measure(hm)
+        return super().forward(coords * (self.size - 1))
+
+
+class HeatMapToParabola(ToParabola):
+
+    def forward(self, hm: Tensor):
+        coords, p = heatmap_to_measure(hm)
+        return super().forward(coords * (self.size - 1))
 
 
 def heatmap_to_measure(hm: Tensor):
 
         B, N, D, D = hm.shape
+
+        hm = hm.relu()
+
+        hm = hm / hm.sum(dim=[2,3], keepdim=True)
+        hm = hm / hm.shape[1]
 
         x = torch.arange(D, device=hm.device).view(1, 1, -1)
         y = torch.arange(D, device=hm.device).view(1, 1, -1)
@@ -83,6 +129,9 @@ def heatmap_to_measure(hm: Tensor):
         coords_x = ((px * x).sum(dim=2) / p)[..., None]
         coords_y = ((py * y).sum(dim=2) / p)[..., None]
         coords = torch.cat([coords_y, coords_x], dim=-1) / (D - 1)
+
+        # if coords.max() > 1.0:
+        # print(coords.max())
 
         return coords, p
 
@@ -95,3 +144,104 @@ def sparse_heatmap(hm: Tensor):
 
     return shm / norm.view(B, N, 1, 1)
 
+
+def dist_to_line(p: Tensor, p0: Tensor, p1: Tensor):
+    x, x0, x1 = p[:, :, 0], p0[:, :, 0], p1[:, :, 0]
+    y, y0, y1 = p[:, :, 1], p0[:, :, 1], p1[:, :, 1]
+
+    d01 = (p0 - p1).pow(2).sum(2).sqrt()
+
+    return ((y0 - y1) * x - (x0 - x1) * y + (x0 * y1 - x1 * y0)).abs() / d01
+
+
+def dist_to_snippet(p: Tensor, p0: Tensor, p1: Tensor):
+
+    x, x0, x1 = p[:, :, 0], p0[:, :, 0], p1[:, :, 0]
+    y, y0, y1 = p[:, :, 1], p0[:, :, 1], p1[:, :, 1]
+    d01 = (p0 - p1).pow(2).sum(2) + 1e-4
+
+    t =((x-x0)*(x1-x0) + (y-y0)*(y1-y0)) / d01
+    t = t.relu()
+    t = 1 - (1 - t).relu()
+    t = t.detach()
+
+    assert not torch.any(torch.isnan(t))
+
+    return ((x0 - x + (x1-x0)*t).pow(2) + (y0 - y + (y1-y0)*t).pow(2))
+
+
+class ToGaussSkeleton:
+
+    def __init__(self, size, sigma):
+        self.size = size
+        self.sigma = sigma
+
+    def forward(self, p0: Tensor, p1: Tensor):
+        B, N, D = p0.shape
+
+        xy = make_coords(B, self.size, self.size, p0.device)\
+            .view(B, 1, 2, self.size, self.size).repeat(1, N, 1, 1, 1)
+
+        xy_dist = -dist_to_snippet(xy, p0.view(B, N, 2, 1, 1), p1.view(B, N, 2, 1, 1)) / (self.sigma**2)
+        xy_dist = xy_dist.clamp(-30, 30)
+
+        p = xy_dist.exp()
+        assert not torch.any(torch.isnan(p))
+
+        return p
+
+
+def crop_min(at: List[Tensor]):
+    size = min([t.shape[1] for t in at])
+    return [t[:, 0:size] for t in at]
+
+
+class CoordToGaussSkeleton(ToGaussSkeleton):
+
+    def find_pairs(self, coord: Tensor):
+
+        B, N, D = coord.shape
+
+        p0 = []
+        p1 = []
+
+        for i in range(B):
+            edge_index = knn_graph(coord[i], k=2, loop=False,)
+
+            coord0 = coord[i, edge_index[0]]
+            coord1 = coord[i, edge_index[1]]
+            p0.append(coord0[None, ])
+            p1.append(coord1[None, ])
+
+        return torch.cat(crop_min(p0)), torch.cat(crop_min(p1))
+
+    def forward(self, coord: Tensor):
+
+        p0, p1 = self.find_pairs(coord)
+        assert not torch.any(torch.isnan(p0))
+        assert not torch.any(torch.isnan(p1))
+        assert p0.max().item() <= 1 + 1e-5
+        assert p1.max().item() <= 1 + 1e-5
+
+        return super().forward(p0 * (self.size-1), p1 * (self.size-1))
+
+
+if __name__ == "__main__":
+
+    from matplotlib import pyplot as plt
+    from dataset.probmeasure import UniformMeasure2DFactory, UniformMeasure2D01
+    from modules.linear_ot import PairwiseDistance, SOT
+
+    N = 10
+    B = 1
+    size = 256
+
+    barycenter: UniformMeasure2D01 = UniformMeasure2DFactory.load(
+        f"{Paths.default.models()}/face_barycenter_68").batch_repeat(10)
+
+    barycenter.coord = barycenter.coord[:, torch.randperm(68)]
+
+    hm = CoordToGaussSkeleton(size, 5).forward(barycenter.coord)
+    plt.imshow(hm[0].sum(0))
+
+    plt.show()

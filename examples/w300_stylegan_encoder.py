@@ -13,10 +13,10 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
 from loss.tuner import GoldTuner
 from loss.regulariser import UnoTransformRegularizer, DualTransformRegularizer
-from gan.loss.gan_loss import StyleGANLoss, StyleGANLossWithoutPenalty
+from gan.loss.base import StyleGANLoss, StyleGANLossWithoutPenalty
 from model import Generator
 from dataset.toheatmap import ToHeatMap, heatmap_to_measure
-from gans_pytorch.gan.noise.stylegan_noise import mixing_noise
+from gans_pytorch.gan.noise.stylegan import mixing_noise
 from loss.hmloss import HMLoss
 import albumentations
 import torch

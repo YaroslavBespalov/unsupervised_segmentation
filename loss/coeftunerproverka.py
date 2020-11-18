@@ -3,7 +3,7 @@ from itertools import chain
 from torch import nn, Tensor
 import torch
 
-from gan.loss_base import Loss
+from gan.loss.loss_base import Loss
 
 from loss.tuner import CoefTuner, GoldTuner
 

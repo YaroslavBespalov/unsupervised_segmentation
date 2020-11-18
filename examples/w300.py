@@ -80,7 +80,7 @@ def test(enc):
 
 
 encoder_HG = HG_softmax2020(num_classes=68, heatmap_size=64)
-# encoder_HG.load_state_dict(torch.load(f"{Paths.default.models()}/hg2_e29.pt", map_location="cpu"))
+# encoder_HG.load_state_dict(torch.load(f"{Paths.default.nn()}/hg2_e29.pt", map_location="cpu"))
 encoder_HG = encoder_HG.cuda()
 encoder_HG = nn.DataParallel(encoder_HG, [0, 1, 3])
 

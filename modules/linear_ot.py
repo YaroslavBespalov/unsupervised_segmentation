@@ -5,8 +5,8 @@ from dataset.probmeasure import ProbabilityMeasure
 from torch import Tensor
 import time
 
+from gan.loss.loss_base import Loss
 from loss.losses import Samples_Loss
-from gan.loss_base import Loss
 
 
 class PairwiseDistance(nn.Module):
@@ -109,10 +109,12 @@ class SOT(nn.Module):
 
         return P.type(torch.float32)
 
-    def forward(self, m1: ProbabilityMeasure, m2: ProbabilityMeasure):
+    def forward(self, m1: ProbabilityMeasure, m2: ProbabilityMeasure, M: Tensor = None):
 
-        M = self.pdist(m1.coord, m2.coord)
-        M = M / M.max(dim=1)[0].max(dim=1)[0].view(-1, 1, 1)
+        if M is None:
+            M = self.pdist(m1.coord, m2.coord)
+            M = M / M.max(dim=1)[0].max(dim=1)[0].view(-1, 1, 1)
+
         a = m1.probability + 1e-8
         a /= a.sum(dim=1, keepdim=True)
         b = m2.probability + 1e-8

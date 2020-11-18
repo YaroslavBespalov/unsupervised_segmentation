@@ -1,10 +1,8 @@
 {
-  "Fake-content D": 0.2,
-  "Real-content D": 0.1,
-  "R_b": 15.0,
-  "Sparse": 1000.0,
-  "R_t": 7000.0,
-  "L1 image": 3.0,
-  "fake_content loss": 2.0,
-  "borj4_w300": 0.0
+  "Fake-content D": 0.6,
+  "R_b": 14.0,
+  "R_t": 1500.0,
+  "L1 image": 30.0,
+  "fake_content loss": 20.0,
+  "borj4_w300": 30.0
 }

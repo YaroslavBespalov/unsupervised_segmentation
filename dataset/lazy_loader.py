@@ -116,7 +116,7 @@ class Celeba:
             albumentations.HorizontalFlip(),
             albumentations.Resize(CelebaWithKeyPoints.image_size, CelebaWithKeyPoints.image_size),
             # albumentations.ElasticTransform(p=0.5, alpha=50, alpha_affine=1, sigma=10),
-            albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10),
+            albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10, scale_limit=(-0.1, 0.3)),
             albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             AlbToTensor()
         ])

@@ -4,7 +4,8 @@ import torch
 from torch import nn, Tensor
 
 import copy
-from gan.loss_base import Loss
+
+from gan.loss.loss_base import Loss
 
 
 class CoefTuner:
