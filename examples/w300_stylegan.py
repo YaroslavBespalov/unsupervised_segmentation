@@ -1,5 +1,4 @@
 import sys, os
-from itertools import chain
 
 import albumentations
 
@@ -12,48 +11,26 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 from dataset.toheatmap import heatmap_to_measure
 from modules.hg import HG_softmax2020
 
-from dataset.d300w import ThreeHundredW
-from albumentations.pytorch.transforms import ToTensor as AlbToTensor
-from loss.tuner import CoefTuner, GoldTuner
-from dataset.lazy_loader import LazyLoader, CelebaWithKeyPoints, Celeba
+from dataset.lazy_loader import LazyLoader, Celeba
 from gan.loss.base import StyleGANLoss
-from gan.loss.penalties.penalty import DiscriminatorPenalty
-from loss.losses import Samples_Loss
-from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
-    UnoTransformRegularizer
-from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure
+from loss.regulariser import UnoTransformRegularizer
+from transforms_utils.transforms import ToNumpy, NumpyBatch, ToTensor
 
-import argparse
-import math
 import random
-import os
 import time
-from typing import List, Optional, Callable, Any
+from typing import Optional, Callable, Any
 
-import numpy as np
 import torch
-from torch import nn, autograd, optim, Tensor
-from torch.nn import functional as F
-from torch.utils import data
-import torch.distributed as dist
+from torch import nn, optim, Tensor
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import transforms, utils
-from torchvision.datasets import ImageFolder
 
-from dataset.cardio_dataset import ImageMeasureDataset
-from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric
-from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, \
+from dataset.probmeasure import ProbabilityMeasure
+from gan.gan_model import CondStyleGanModel, \
     CondGen3, CondDisc3, requires_grad
 from gan.loss_base import Loss
 from metrics.writers import ItersCounter, send_images_to_tensorboard
-from models.common import View
-from models.munit.enc_dec import MunitEncoder, StyleEncoder
-from models.uptosize import MakeNoise
-from parameters.dataset import DatasetParameters
-from parameters.deformation import DeformationParameters
-from parameters.gan import GanParameters, MunitParameters
-from stylegan2.model import Generator, Discriminator, EqualLinear, EqualConv2d
-
+from nn.munit.enc_dec import StyleEncoder
+from stylegan2.model import Generator
 
 counter = ItersCounter()
 writer = SummaryWriter(f"/trinity/home/n.buzun/runs/stylegan{int(time.time())}")

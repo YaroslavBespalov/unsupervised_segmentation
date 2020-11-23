@@ -48,7 +48,7 @@ class LinearTransformOT:
 
         T = targets.mean() - pred.mean()
 
-        return A.cuda().type_as(pred.coord), T.detach()
+        return A.type_as(pred.coord), T.detach()
 
 
 class SOT(nn.Module):

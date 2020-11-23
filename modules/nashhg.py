@@ -3,13 +3,12 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import logging
 from torch import Tensor
 from typing import List
 
 from dataset.probmeasure import UniformMeasure2D01, UniformMeasure2DFactory
-from dataset.toheatmap import ToHeatMap, heatmap_to_measure, ToGaussHeatMap, HeatMapToGaussHeatMap, CoordToGaussSkeleton
-from models.common import View
+from dataset.toheatmap import heatmap_to_measure, ToGaussHeatMap
+from nn.common.view import View
 
 
 def get_preds(scores):

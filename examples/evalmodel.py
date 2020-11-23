@@ -5,7 +5,7 @@ import sys, os
 from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric
 from gan.gan_model import cont_style_munit_enc
 from loss.losses import Samples_Loss
-from models.munit.enc_dec import MunitEncoder
+from nn.munit.enc_dec import MunitEncoder
 from parameters.dataset import DatasetParameters
 from parameters.deformation import DeformationParameters
 from parameters.gan import GanParameters, MunitParameters

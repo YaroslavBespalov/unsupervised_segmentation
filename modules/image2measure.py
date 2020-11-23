@@ -1,10 +1,7 @@
-import math
-
 import torch
 from torch import Tensor, nn
 
 from dataset.probmeasure import ProbabilityMeasure
-from models.attention import SelfAttention2d
 from useful_utils.spectral_functions import spectral_norm_init
 
 

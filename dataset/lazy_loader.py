@@ -110,23 +110,21 @@ class Celeba:
     image_size = 256
     batch_size = 8
 
-    @staticmethod
-    def transform():
-        return albumentations.Compose([
+    transform = albumentations.Compose([
             albumentations.HorizontalFlip(),
             albumentations.Resize(CelebaWithKeyPoints.image_size, CelebaWithKeyPoints.image_size),
             # albumentations.ElasticTransform(p=0.5, alpha=50, alpha_affine=1, sigma=10),
             albumentations.ShiftScaleRotate(p=0.5, rotate_limit=10, scale_limit=(-0.1, 0.3)),
             albumentations.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             AlbToTensor()
-        ])
+    ])
 
     def __init__(self):
         print("init calaba")
 
         dataset = ImageDataset(
             f"{Paths.default.data()}/celeba",
-            img_transform=Celeba.transform()
+            img_transform=Celeba.transform
         )
 
         print("dataset size: ", len(dataset))

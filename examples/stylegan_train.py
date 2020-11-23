@@ -10,38 +10,31 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
 from albumentations.pytorch.transforms import ToTensor as AlbToTensor
-from loss.tuner import CoefTuner, GoldTuner
+from loss.tuner import GoldTuner
 from gan.loss.base import StyleGANLoss
-from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
-from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
-    UnoTransformRegularizer
+from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, UnoTransformRegularizer
 from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure
 
 import argparse
 import math
 import random
-import os
 import time
-from typing import List, Optional, Callable, Any
+from typing import Optional, Callable, Any
 
-import numpy as np
 import torch
 from torch import nn, autograd, optim, Tensor
 from torch.nn import functional as F
 from torch.utils import data
-import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 
 
-from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset
+from dataset.cardio_dataset import ImageDataset
 from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric
 from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, CondGen2
 from gan.loss_base import Loss
 from metrics.writers import ItersCounter, send_images_to_tensorboard
-from models.common import View
-from models.munit.enc_dec import MunitEncoder, StyleEncoder
-from models.uptosize import MakeNoise
+from nn.munit.enc_dec import MunitEncoder
 from parameters.dataset import DatasetParameters
 from parameters.deformation import DeformationParameters
 from parameters.gan import GanParameters, MunitParameters
@@ -52,7 +45,9 @@ try:
 except ImportError:
     wandb = None
 
-from stylegan2.model import Generator, Discriminator, EqualLinear, EqualConv2d
+from stylegan2.model import Generator, Discriminator
+
+
 # from stylegan2.dataset import MultiResolutionDataset
 # from stylegan2.distributed import (
 #     get_rank,

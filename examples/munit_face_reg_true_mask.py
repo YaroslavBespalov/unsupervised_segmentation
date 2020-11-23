@@ -12,7 +12,7 @@ sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
-from models.munit.enc_dec import MunitEncoder
+from nn.munit.enc_dec import MunitEncoder
 import argparse
 import time
 from itertools import chain

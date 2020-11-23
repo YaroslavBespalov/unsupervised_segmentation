@@ -29,7 +29,7 @@ from dataset.lazy_loader import LazyLoader, W300DatasetLoader, CelebaWithKeyPoin
 from dataset.probmeasure import ProbabilityMeasureFabric, ProbabilityMeasure, UniformMeasure2DFactory
 from gan.gan_model import cont_style_munit_enc, CondGen3, CondDisc3, CondStyleGanModel
 from metrics.writers import ItersCounter, send_images_to_tensorboard
-from models.munit.enc_dec import MunitEncoder, StyleEncoder
+from nn.munit.enc_dec import MunitEncoder, StyleEncoder
 from modules.hg import hg2, final_preds_untransformed, hg8, hg4, HG_softmax2020
 from gan.loss_base import Loss
 from transforms_utils.transforms import MeasureToMask, ToNumpy, ToTensor, MaskToMeasure, NumpyBatch, MeasureToKeyPoints, \

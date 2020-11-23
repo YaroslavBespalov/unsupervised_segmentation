@@ -3,32 +3,19 @@ from typing import Callable
 import torch
 from torch import nn, Tensor
 
-class PairwiseCost(nn.Module):
+from gan.nn.stylegan.generator import Generator1
 
-    def __init__(self, cost: Callable[[Tensor, Tensor], Tensor]):
-        super().__init__()
-        self.cost = cost
+torch.cuda.set_device("cuda:1")
 
-    def forward(self, x: Tensor, y: Tensor):
+gen = nn.DataParallel(Generator1(128, 512, 5, channel_multiplier=1).cuda(), [1,3])
 
-        B, N, D = x.shape
+styles = torch.randn(8, 512).cuda()
+cond = torch.randn(8, 512, 4, 4).cuda()
 
-        assert y.shape[1] == N
-        x = x[:, :, None, :]
-        y = y[:, None, :, :]
-        # x = x.repeat(1, 1, N, 1).view(B, N * N, D)
-        # y = y.repeat(1, N, 1, 1).view(B, N * N, D)
+noise = [torch.randn(8, 512, 4, 4).cuda()]
+for i in range(0, gen.module.log_size - 2):
+    noise.append(torch.randn(8, gen.module.channels[2 ** (i+3)], 8 * (2 ** i), 8 * (2 ** i)).cuda())
+    noise.append(torch.randn(8, gen.module.channels[2 ** (i+3)], 8 * (2 ** i), 8 * (2 ** i)).cuda())
 
-
-        return self.cost(x, y)
-
-
-c1 = torch.randn(1, 5, 2).sigmoid()
-c2 = torch.randn(1, 5, 2).sigmoid()
-
-print((c1[0, 2] - c2[0, 1]).pow(2).sum())
-print((c1[0, 1] - c2[0, 2]).pow(2).sum())
-
-M = PairwiseCost(lambda x, y: (x-y).pow(2).sum(-1))(c1, c2)
-print(M[0, 2, 1])
+res = gen.forward([styles], cond, noise=noise)
 

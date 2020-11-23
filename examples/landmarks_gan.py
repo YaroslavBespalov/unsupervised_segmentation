@@ -1,62 +1,38 @@
-import torch
-from torch import nn, Tensor
-
 import json
 import sys, os
-
-import albumentations
-
 
 sys.path.append(os.path.join(sys.path[0], '../'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
-from models.stylegan import ScaledConvTranspose2d
-from models.lambdaf import MySequential, LambdaF
+from gan.nn.stylegan.components import ScaledConvTranspose2d
+from nn.common.lambdaf import MySequential, LambdaF
 from dataset.lazy_loader import LazyLoader, Celeba, W300DatasetLoader
-from dataset.toheatmap import heatmap_to_measure, ToHeatMap, sparse_heatmap, ToGaussHeatMap, HeatMapToGaussHeatMap, \
-    HeatMapToParabola, CoordToGaussSkeleton
-from modules.nashhg import HG_softmax2020, HG_squeremax2020, HG_skeleton
+from dataset.toheatmap import heatmap_to_measure, CoordToGaussSkeleton
+from modules.nashhg import HG_skeleton
 from modules.hg import HG_softmax2020 as IXHG
 from parameters.path import Paths
 
-from albumentations.pytorch.transforms import ToTensor as AlbToTensor
-from loss.tuner import CoefTuner, GoldTuner
 from gan.loss.base import StyleGANLoss
-from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
-from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
-    UnoTransformRegularizer
-from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure, ResizeMask, \
-    NormalizeMask, ParTr
-from stylegan2.op import upfirdn2d
-import argparse
-import math
 import random
-import os
 import time
-from typing import List, Optional, Callable, Any, Tuple
+from typing import Optional, Callable, Any
 
 import numpy as np
 import torch
-from torch import nn, autograd, optim, Tensor
-from torch.nn import functional as F
-from torch.utils import data
-import torch.distributed as dist
+from torch import nn, optim, Tensor
 from torch.utils.tensorboard import SummaryWriter
 
-from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset
-from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric, UniformMeasure2DFactory, \
+from dataset.probmeasure import UniformMeasure2DFactory, \
     UniformMeasure2D01
-from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, CondGen2, CondGen3, CondDisc3, \
-    CondGenDecode, StyleGanModel, CondDisc4, CondDisc7
+from gan.gan_model import CondStyleGanModel, CondDisc7
 from gan.loss.loss_base import Loss
 from metrics.writers import ItersCounter, send_images_to_tensorboard
-from models.common import View
-from models.munit.enc_dec import MunitEncoder, StyleEncoder
-from models.uptosize import MakeNoise
-from stylegan2.model import Generator, Discriminator, EqualLinear, EqualConv2d, Blur, ConvLayer
+from nn.common.view import View
+from nn.munit.enc_dec import StyleEncoder
+from stylegan2.model import EqualLinear, ConvLayer
 from modules.linear_ot import SOT, PairwiseDistance
 
 

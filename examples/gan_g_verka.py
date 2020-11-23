@@ -14,42 +14,30 @@ from dataset.toheatmap import heatmap_to_measure, ToHeatMap, sparse_heatmap, ToG
 from modules.hg import HG_softmax2020
 from parameters.path import Paths
 
-from albumentations.pytorch.transforms import ToTensor as AlbToTensor
 from loss.tuner import CoefTuner, GoldTuner
 from gan.loss.base import StyleGANLoss
-from gan.loss.penalties.penalty import DiscriminatorPenalty
 from loss.losses import Samples_Loss
 from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
     UnoTransformRegularizer
-from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure, ResizeMask, \
-    NormalizeMask, ParTr
-from stylegan2.op import upfirdn2d
-import argparse
-import math
+from transforms_utils.transforms import ToNumpy, NumpyBatch, ToTensor, MaskToMeasure, ResizeMask, \
+    NormalizeMask
 import random
-import os
 import time
 from typing import List, Optional, Callable, Any
 
 import numpy as np
 import torch
-from torch import nn, autograd, optim, Tensor
-from torch.nn import functional as F
-from torch.utils import data
+from torch import nn, optim, Tensor
 import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 
-from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset
 from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric, UniformMeasure2DFactory, \
     UniformMeasure2D01
-from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, CondGen2, CondGen3, CondDisc3, \
-    CondGenDecode
+from gan.gan_model import cont_style_munit_enc, CondStyleGanModel, CondGen2, CondGen3, CondGenDecode
 from gan.loss.loss_base import Loss
 from metrics.writers import ItersCounter, send_images_to_tensorboard
-from models.common import View
-from models.munit.enc_dec import MunitEncoder, StyleEncoder
-from models.uptosize import MakeNoise
-from stylegan2.model import Generator, Discriminator, EqualLinear, EqualConv2d, Blur
+from nn.common.view import View
+from stylegan2.model import Generator, Discriminator, EqualConv2d, Blur
 
 
 

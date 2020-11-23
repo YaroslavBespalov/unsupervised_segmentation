@@ -71,7 +71,6 @@ def train_content(cont_opt, R_b, R_t, real_img, model, encoder_HG, decoder, gene
     heatmapper = ToGaussHeatMap(256, 1)
 
     requires_grad(encoder_HG, True)
-    requires_grad(decoder, False)
 
     coefs = json.load(open("../parameters/content_loss.json"))
     encoded = encoder_HG(real_img)
@@ -79,22 +78,10 @@ def train_content(cont_opt, R_b, R_t, real_img, model, encoder_HG, decoder, gene
 
     heatmap_content = heatmapper.forward(encoded["coords"]).detach()
 
-    restored = decoder(encoded["skeleton"], style_encoder(real_img))
-
-    noise = mixing_noise(B, C, 0.9, real_img.device)
-    fake, _ = generator(encoded["skeleton"], noise)
-    fake_content = encoder_HG(fake.detach())["coords"]
 
     ll = (
         WR.writable("R_b", R_b.__call__)(real_img, pred_measures) * coefs["R_b"] +
-        WR.writable("R_t", R_t.__call__)(real_img, heatmap_content) * coefs["R_t"] +
-        WR.L1("L1 image")(restored, real_img) * coefs["L1 image"] +
-        WR.writable("fake_content loss", coord_hm_loss)(
-            fake_content, heatmap_content
-        ) * coefs["fake_content loss"] +
-        WR.writable("Fake-content D", model.loss.generator_loss)(
-            real=None,
-            fake=[fake, encoded["skeleton"].detach()]) * coefs["Fake-content D"]
+        WR.writable("R_t", R_t.__call__)(real_img, heatmap_content) * coefs["R_t"]
     )
 
     ll.minimize_step(cont_opt)
@@ -137,6 +124,8 @@ def content_trainer_with_gan(cont_opt, tuner, encoder_HG, R_b, R_t, model, gener
 
         ll.minimize_step(cont_opt)
 
+
+
     return do_train
 
 
@@ -144,14 +133,14 @@ def sup_loss(pred_mes, target_mes):
 
     heatmapper = ToGaussHeatMap(256, 1)
 
-    pred_hm = heatmapper.forward(pred_mes.coord).sum(dim=1, keepdim=True)
-    pred_hm = pred_hm / pred_hm.sum(dim=[2, 3], keepdim=True).detach()
-    target_hm = heatmapper.forward(target_mes.coord).sum(dim=1, keepdim=True).detach()
+    pred_hm = heatmapper.forward(pred_mes.coord)
+    pred_hm = pred_hm / (pred_hm.sum(dim=[2, 3], keepdim=True).detach() + 1e-8)
+    target_hm = heatmapper.forward(target_mes.coord).detach()
     target_hm = target_hm / target_hm.sum(dim=[2, 3], keepdim=True).detach()
 
     return Loss(
         nn.BCELoss()(pred_hm, target_hm) * 100 +
-        Samples_Loss(0.01, 0.95, p=2).forward(pred_mes, target_mes).to_tensor() * 0.5
+        nn.MSELoss()(pred_mes.coord, target_mes.coord) * 0.5
     )
 
 
@@ -161,8 +150,8 @@ def content_trainer_supervised(cont_opt, encoder_HG, loader):
         requires_grad(encoder_HG, True)
         w300_batch = next(loader)
         w300_image = w300_batch['data'].cuda()
-        w300_mes = ProbabilityMeasureFabric(256).from_coord_tensor(w300_batch["meta"]["keypts_normalized"]).cuda()
-        # w300_target_hm = encoder_HG.skeletoner.forward(w300_mes.coord)
+        landmarks = w300_batch["meta"]["keypts_normalized"].cuda()
+        w300_mes = UniformMeasure2D01(torch.clamp(landmarks, max=1))
         pred_coord = encoder_HG(w300_image)["coords"]
         pred_mes = UniformMeasure2D01(pred_coord)
 

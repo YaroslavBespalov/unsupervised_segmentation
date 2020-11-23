@@ -1,66 +1,45 @@
 import json
 import sys, os
 
-from train_procedure import gan_trainer, content_trainer_with_gan, content_trainer_supervised, requires_grad, \
-    train_content
-
 sys.path.append(os.path.join(sys.path[0], '../'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/stylegan2'))
 sys.path.append(os.path.join(sys.path[0], '../gans_pytorch/gan/'))
 
+from gan.loss.stylegan import StyleGANLoss
+from gan.models.stylegan import CondStyleGanModel
+from gan.nn.stylegan.discriminator import ConditionalDiscriminator
+from gan.nn.stylegan.generator import CondGen7, ConditionalDecoder
+from gan.nn.stylegan.style_encoder import StyleEncoder
+from train_procedure import gan_trainer, content_trainer_with_gan, content_trainer_supervised, requires_grad, \
+    train_content
+
+
 from modules.accumulator import Accumulator
 import albumentations
 # from matplotlib import pyplot as plt
-from gan.noise.stylegan import mixing_noise
-from loss.hmloss import noviy_hm_loss, coord_hm_loss
+from loss.hmloss import coord_hm_loss
 from metrics.measure import liuboff
 from viz.image_with_mask import imgs_with_mask
 
 from dataset.lazy_loader import LazyLoader, Celeba, W300DatasetLoader
-from dataset.toheatmap import heatmap_to_measure, ToHeatMap, sparse_heatmap, ToGaussHeatMap, HeatMapToGaussHeatMap, \
-    HeatMapToParabola, CoordToGaussSkeleton
+from dataset.toheatmap import ToGaussHeatMap, CoordToGaussSkeleton
 # from modules.hg import HG_softmax2020
-from modules.nashhg import HG_softmax2020, HG_skeleton
+from modules.nashhg import HG_skeleton
 from parameters.path import Paths
 
-from albumentations.pytorch.transforms import ToTensor as AlbToTensor
-from loss.tuner import CoefTuner, GoldTuner
-from gan.loss.base import StyleGANLoss
-from gan.loss.penalties.penalty import DiscriminatorPenalty
-from loss.losses import Samples_Loss
-from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, StyleTransformRegularizer, \
-    UnoTransformRegularizer
-from transforms_utils.transforms import MeasureToMask, ToNumpy, NumpyBatch, ToTensor, MaskToMeasure, ResizeMask, \
-    NormalizeMask, ParTr
-from stylegan2.op import upfirdn2d
-import argparse
-import math
-import random
-import os
-import time
-from typing import List, Optional, Callable, Any, Tuple
+from loss.tuner import GoldTuner
+from loss.regulariser import DualTransformRegularizer, BarycenterRegularizer, UnoTransformRegularizer
+from transforms_utils.transforms import ToNumpy, NumpyBatch, ToTensor
 
-import numpy as np
 import torch
-from torch import nn, autograd, optim, Tensor
-from torch.nn import functional as F
-from torch.utils import data
-import torch.distributed as dist
-from torch.utils.tensorboard import SummaryWriter
+from torch import nn, optim
 
-from dataset.cardio_dataset import ImageMeasureDataset, ImageDataset
-from dataset.probmeasure import ProbabilityMeasure, ProbabilityMeasureFabric, UniformMeasure2DFactory, \
+from dataset.probmeasure import UniformMeasure2DFactory, \
     UniformMeasure2D01
-from gan.gan_model import CondStyleDisc2Wrapper, cont_style_munit_enc, CondStyleGanModel, CondGen2, CondGen3, CondDisc3, \
-    CondGenDecode, CondDisc4, CondGen7, CondDisc7
-from gan.loss_base import Loss
-from metrics.writers import ItersCounter, send_images_to_tensorboard, WR
-from models.common import View
-from models.munit.enc_dec import MunitEncoder, StyleEncoder
-from models.uptosize import MakeNoise
-from stylegan2.model import Generator, Discriminator, EqualLinear, EqualConv2d, Blur
-from modules.linear_ot import SOT, PairwiseDistance
+
+from metrics.writers import send_images_to_tensorboard, WR
+from stylegan2.model import Generator
 
 
 def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, starting_model_number):
@@ -69,9 +48,9 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
     sample_z = torch.randn(8, latent_size, device=device)
     Celeba.batch_size = batch_size
     W300DatasetLoader.batch_size = batch_size
-    W300DatasetLoader.test_batch_size = 32
+    W300DatasetLoader.test_batch_size = 16
 
-    test_img = next(LazyLoader.celeba().loader)[:8].cuda()
+    test_img = next(LazyLoader.w300().loader_train_inf)["data"][:8].cuda()
 
     model = CondStyleGanModel(generator, StyleGANLoss(discriminator), (0.001/4, 0.0015/4))
 
@@ -188,7 +167,7 @@ def train(generator, decoder, discriminator, encoder_HG, style_encoder, device, 
 
 
 if __name__ == '__main__':
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     print(device)
     torch.cuda.set_device(device)
 
@@ -209,7 +188,7 @@ if __name__ == '__main__':
         size, latent, n_mlp, channel_multiplier=1
     ), heatmap_channels=1, cond_mult=1.0)
 
-    discriminator = CondDisc7(
+    discriminator = ConditionalDiscriminator(
         size, channel_multiplier=1, heatmap_channels=1, cond_mult=1.0
     )
 
@@ -233,9 +212,9 @@ if __name__ == '__main__':
     discriminator = discriminator.to(device)
     encoder_HG = encoder_HG.cuda()
     style_encoder = style_encoder.cuda()
-    decoder = CondGenDecode(generator)
+    decoder = ConditionalDecoder(generator)
 
-    GPUS = [0, 2]
+    GPUS = [1, 2]
 
     generator = nn.DataParallel(generator, GPUS)
     discriminator = nn.DataParallel(discriminator, GPUS)

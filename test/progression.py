@@ -6,11 +6,11 @@ import torch
 from torch import nn, Tensor
 
 from model import StyledConv, ToRGB
-from models.unet.la_divina_progressiya import Progressive,  ProgressiveWithStateInit, \
-    ProgressiveSequential, InjectLast, InjectByName, InputFilterHorisontal, InputFilterVertical, \
-    InputFilterAll, InputFilterName
+from nn.progressiya.base import Progressive, ProgressiveWithStateInit, \
+    InjectLast, InjectByName, ProgressiveWithoutState, LastElementCollector
+from nn.progressiya.unet import ProgressiveSequential, InputFilterAll, InputFilterName, InputFilterVertical, ZapomniKak
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 print(device)
 torch.cuda.set_device(device)
 
@@ -151,10 +151,10 @@ class TestSimpleProgression(unittest.TestCase):
         out = torch.randn(8, channels[4], 4, 4).cuda()
         init_state = out
         latent = torch.randn(8, n_latent, style_dim).cuda()
-        noise = [torch.randn(8, 1, 4, 4).cuda()]
+        noise = [torch.randn(8, 64, 4, 4).cuda()]
         for i in range(0, len(convs)//2):
-            noise.append(torch.randn(8, 1, 8 * (2 ** i), 8 * (2 ** i)).cuda())
-            noise.append(torch.randn(8, 1, 8 * (2 ** i), 8 * (2 ** i)).cuda())
+            noise.append(torch.randn(8, channels[2 ** (i+3)], 8 * (2 ** i), 8 * (2 ** i)).cuda())
+            noise.append(torch.randn(8, channels[2 ** (i+3)], 8 * (2 ** i), 8 * (2 ** i)).cuda())
 
         main_out = [init_state]
         out = conv1(out, latent[:, 0], noise=noise[0])
@@ -174,19 +174,21 @@ class TestSimpleProgression(unittest.TestCase):
             i += 2
 
 
-        dict_ml = [conv1] + convs
+        # dict_ml = [conv1] + convs
         # input_dict = [{'noise': noise[i], 'style': latent[:,i,:]} for i in range(len(convs)+1)]
         style_list = [latent[:, i] for i in range(len(convs)+2)]
 
-        pr = Progressive[List[Tensor]](dict_ml, InjectByName("input"))
-        progessive_out = pr.forward(init_state, noise=noise, style=style_list)
+        pr: nn.Module = Progressive[List[Tensor]]([conv1] + convs, InjectByName("input"))
+        # pr = pr.cuda("cuda:1")
+        print(next(pr.parameters()).device)
+
+        pr_par = nn.DataParallel(pr, [1, 3])
+
+        progessive_out = pr_par.forward(init_state, noise=noise, style=style_list)
         for i in range(len(progessive_out)):
             self.assertAlmostEqual((main_out[i] - progessive_out[i]).abs().max().item(), 0, delta=1e-5)
 
-        pr2_with_init = ProgressiveWithStateInit(
-            to_rgb1,
-            Progressive[List[Tensor]](to_rgbs, InjectByName("skip"))
-        )
+        pr2_with_init = ProgressiveWithoutState[List[Tensor]]([to_rgb1] + to_rgbs, InjectByName("skip"))
 
         style_list_1 = [latent[:, i, :] for i in range(1, len(convs) + 2, 2)]
         input_list_1 = [progessive_out[i] for i in range(1, len(convs) + 2, 2)]
@@ -195,9 +197,14 @@ class TestSimpleProgression(unittest.TestCase):
         self.assertAlmostEqual((skip - progessive_skip_1[-1]).abs().max().item(), 0, delta=1e-5)
 
         seq = ProgressiveSequential(
-            (pr, "input", InputFilterAll(), InputFilterAll()),
-            (pr2_with_init, "res", InputFilterName({'input', 'style'}), InputFilterVertical(list(range(1, len(convs) + 2, 2))))
+            Progressive[List[Tensor]]([conv1] + convs, InjectByName("input")),
+            ZapomniKak("input"),
+            InputFilterName({'input', 'style'}),
+            InputFilterVertical(list(range(1, len(convs) + 2, 2))),
+            ProgressiveWithoutState[Tensor]([to_rgb1] + to_rgbs, InjectByName("skip"), LastElementCollector)
         )
 
-        res = seq.forward([init_state, None], noise=noise, style=style_list)
-        self.assertAlmostEqual((skip - res[-1]).abs().max().item(), 0, delta=1e-5)
+        seq_par = nn.DataParallel(seq, [1, 3])
+
+        res = seq_par.forward([init_state, None], noise=noise, style=style_list)
+        self.assertAlmostEqual((skip - res).abs().max().item(), 0, delta=1e-5)
