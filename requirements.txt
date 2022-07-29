@@ -62,7 +62,7 @@ Markdown==3.1
 MarkupSafe==1.1.1
 -e git+https://github.com/facebookresearch/maskrcnn-benchmark.git@55796a04ea770029a80cf5933cc5c3f3f6fa59cf#egg=maskrcnn_benchmark
 matplotlib==3.0.3
-mistune==0.8.4
+mistune==2.0.3
 mock==3.0.5
 more-itertools==7.0.0
 nbconvert==5.5.0
