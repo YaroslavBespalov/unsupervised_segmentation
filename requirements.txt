@@ -57,7 +57,7 @@ Keras-Preprocessing==1.0.9
 kiwisolver==1.1.0
 lazy-property==0.0.1
 lmdb==0.98
-Mako==1.0.10
+Mako==1.2.2
 Markdown==3.1
 MarkupSafe==1.1.1
 -e git+https://github.com/facebookresearch/maskrcnn-benchmark.git@55796a04ea770029a80cf5933cc5c3f3f6fa59cf#egg=maskrcnn_benchmark
